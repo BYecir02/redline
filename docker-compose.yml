@@ -30,6 +30,9 @@ services:
       - "8000:8000"
     volumes:
       - ./redline-symfony:/app
+      # var/ (cache + logs) hors du montage Windows : évite les erreurs de
+      # suppression de cache ("Directory not empty") côté Docker Desktop Windows.
+      - /app/var
     # DATABASE_URL injecté ici : Symfony s'y connecte via le réseau Docker
     # (hôte "database"). Le mot de passe est une valeur de dev, pas un secret prod.
     environment:
