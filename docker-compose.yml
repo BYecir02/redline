@@ -1,0 +1,42 @@
+# Orchestration Redline - backend Symfony + base PostgreSQL.
+# Le moteur d'analyse Node sera ajouté plus tard comme service "engine".
+#   Lancer :  docker compose up -d --build
+#   Arrêter : docker compose down
+services:
+  database:
+    image: postgres:16-alpine
+    container_name: redline-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: redline
+      POSTGRES_PASSWORD: redline
+      POSTGRES_DB: redline
+    # Port hôte 55433 pour ne pas entrer en conflit avec un autre PostgreSQL local.
+    ports:
+      - "55433:5432"
+    volumes:
+      - redline_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U redline -d redline"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  php:
+    build: ./redline-symfony
+    container_name: redline-php
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./redline-symfony:/app
+    # DATABASE_URL injecté ici : Symfony s'y connecte via le réseau Docker
+    # (hôte "database"). Le mot de passe est une valeur de dev, pas un secret prod.
+    environment:
+      DATABASE_URL: "postgresql://redline:redline@database:5432/redline?serverVersion=16&charset=utf8"
+    depends_on:
+      database:
+        condition: service_healthy
+
+volumes:
+  redline_pgdata:

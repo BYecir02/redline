@@ -17,10 +17,14 @@ build/
 *.tsbuildinfo
 
 # ---- Environnement & secrets (NE JAMAIS committer) ----
-.env
+# Secrets du moteur Node (JWT_SECRET, identifiants BDD)
+/redline-backend/.env
+# Fichiers d'environnement locaux (secrets) - partout, tous projets
 .env.local
 .env.*.local
 !.env.example
+# NB : redline-symfony/.env est volontairement versionné (config par défaut,
+#      sans secret) ; les vrais secrets Symfony vont dans .env.local (ignoré).
 
 # ---- Symfony ----
 /redline-symfony/var/
