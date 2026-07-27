@@ -24,6 +24,8 @@ security:
     access_control:
         # Inscription et connexion accessibles sans jeton.
         - { path: ^/api/auth, roles: PUBLIC_ACCESS }
+        # Catalogue des règles : donnée publique, pas d'auth requise.
+        - { path: ^/api/skills, roles: PUBLIC_ACCESS }
         # Tout le reste de l'API exige un jeton JWT valide.
         - { path: ^/api, roles: IS_AUTHENTICATED_FULLY }
 
