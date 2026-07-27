@@ -37,9 +37,22 @@ services:
     # (hôte "database"). Le mot de passe est une valeur de dev, pas un secret prod.
     environment:
       DATABASE_URL: "postgresql://redline:redline@database:5432/redline?serverVersion=16&charset=utf8"
+      # URL interne du moteur d'analyse Node (réseau Docker).
+      ENGINE_URL: "http://engine:4000"
     depends_on:
       database:
         condition: service_healthy
+      engine:
+        condition: service_started
+
+  # Moteur d'analyse (Node / ESLint) : service interne appelé par Symfony.
+  # Aucune auth, aucune base - il ne fait qu'analyser du code et renvoyer un rapport.
+  engine:
+    build: ./redline-backend
+    container_name: redline-engine
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
 
 volumes:
   redline_pgdata:
