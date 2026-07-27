@@ -1,0 +1,103 @@
+// Schéma Prisma — persistance de l'HISTORIQUE des détections (analytics/tendances).
+// Le moteur d'analyse reste stateless : la base ne sert qu'à conserver ce qui a
+// été détecté/résolu dans le temps, pour alimenter tendances, MTTR et récurrences.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // url       = connexion applicative (Docker local OU pooler Supabase :6543)
+  // directUrl = connexion directe pour les migrations (identique en Docker ;
+  //             port :5432 côté Supabase, qui refuse les migrations via le pooler)
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum DetectionStatus {
+  ACTIVE
+  RESOLVED
+}
+
+enum EventType {
+  APPEARED
+  RESOLVED
+  REOPENED
+}
+
+/// Un utilisateur authentifié : possède ses propres projets/historique (isolés).
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now())
+  projects     Project[]
+}
+
+/// Un dossier racine surveillé, appartenant à un utilisateur. Le chemin est unique
+/// PAR utilisateur (deux personnes peuvent surveiller le même chemin sans collision).
+model Project {
+  id         String           @id @default(cuid())
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  path       String
+  label      String?
+  /// Skills activés pour ce dossier lors de la dernière configuration (ids).
+  /// Rejoués à la reprise de session pour restaurer les toggles de l'utilisateur.
+  skills     String[]         @default([])
+  /// Sous-dossiers exclus de la surveillance (chemins relatifs, cascade par préfixe).
+  /// Rejoués à la reprise pour restaurer la sélection de l'arbre de sous-dossiers.
+  excluded   String[]         @default([])
+  createdAt  DateTime         @default(now())
+  detections Detection[]
+  events     DetectionEvent[]
+
+  @@unique([userId, path])
+}
+
+/// Une détection = l'IDENTITÉ d'un problème (par signature de contenu), avec son
+/// cycle de vie. On la met à jour au fil des scans plutôt que d'en recréer une.
+model Detection {
+  id          String           @id @default(cuid())
+  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId   String
+  file        String
+  skillId     String
+  category    String
+  severity    String
+  line        Int
+  snippet     String
+  /// signature stable, propre au projet : `fichier::skill::extrait`
+  signature   String
+  status      DetectionStatus  @default(ACTIVE)
+  /// Ignoré = faux positif assumé par l'utilisateur. Masqué de l'UI et exclu des
+  /// stats « actuelles », mais l'historique/les événements restent. Persiste aux
+  /// réouvertures (la ligne est ré-utilisée par signature), définitif jusqu'à restauration.
+  ignored     Boolean          @default(false)
+  firstSeenAt DateTime         @default(now())
+  lastSeenAt  DateTime         @default(now())
+  resolvedAt  DateTime?
+  reopenCount Int              @default(0)
+  events      DetectionEvent[]
+
+  @@unique([projectId, signature])
+  @@index([projectId, status])
+  @@index([skillId])
+}
+
+/// Journal horodaté (append-only) : alimente les courbes de tendance et l'audit.
+model DetectionEvent {
+  id          String     @id @default(cuid())
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId   String
+  detection   Detection? @relation(fields: [detectionId], references: [id], onDelete: SetNull)
+  detectionId String?
+  type        EventType
+  skillId     String
+  severity    String
+  at          DateTime   @default(now())
+
+  @@index([projectId, at])
+  @@index([at])
+}

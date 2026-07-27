@@ -1,0 +1,26 @@
+# Postgres pour redline (historique des scans + analytics).
+# Lancer :  docker compose up -d    | Arrêter : docker compose down
+# Les données persistent dans le volume nommé redline_pgdata.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: redline-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: redline
+      POSTGRES_PASSWORD: redline
+      POSTGRES_DB: redline
+    # Port hôte 55432 : le 5432 ET le 5433 sont déjà pris par un PostgreSQL 18
+    # NATIF installé sur la machine (service postgresql-x64-18). On se met à l'écart.
+    ports:
+      - "55432:5432"
+    volumes:
+      - redline_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U redline -d redline"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redline_pgdata:
