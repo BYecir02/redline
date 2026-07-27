@@ -7,14 +7,15 @@ use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
+use Symfony\Component\Security\Core\User\UserInterface;
 
 /**
  * Un utilisateur authentifié : possède ses propres projets (données isolées).
- * (Les interfaces de sécurité Symfony seront ajoutées à l'étape authentification.)
  */
 #[ORM\Entity(repositoryClass: UserRepository::class)]
 #[ORM\Table(name: 'utilisateur')]
-class User
+class User implements UserInterface, PasswordAuthenticatedUserInterface
 {
     #[ORM\Id]
     #[ORM\GeneratedValue]
@@ -72,6 +73,29 @@ class User
     public function getCreatedAt(): \DateTimeImmutable
     {
         return $this->createdAt;
+    }
+
+    /** Mot de passe haché (contrat PasswordAuthenticatedUserInterface). */
+    public function getPassword(): string
+    {
+        return $this->passwordHash;
+    }
+
+    /** Identifiant de connexion : l'email. */
+    public function getUserIdentifier(): string
+    {
+        return $this->email;
+    }
+
+    /** @return list<string> */
+    public function getRoles(): array
+    {
+        return ['ROLE_USER'];
+    }
+
+    public function eraseCredentials(): void
+    {
+        // Aucun secret transitoire à effacer (le mot de passe n'est jamais en clair).
     }
 
     /** @return Collection<int, Project> */
