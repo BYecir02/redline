@@ -34,7 +34,7 @@ class AiExplainer
             throw new \InvalidArgumentException("Fournisseur IA non supporté : $provider");
         }
 
-        $model = $model !== '' ? $model : (self::DEFAULT_MODEL[$provider] ?? '');
+        $model = $model !== '' ? $model : self::DEFAULT_MODEL[$provider];
 
         $response = $this->httpClient->request('POST', self::ANTHROPIC_URL, [
             'headers' => [

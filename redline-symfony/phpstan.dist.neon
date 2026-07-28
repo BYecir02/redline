@@ -1,0 +1,13 @@
+parameters:
+    level: 5
+    paths:
+        - src
+    # Container Symfony : permet à PHPStan de comprendre les services, contrôleurs
+    # et l'injection de dépendances.
+    symfony:
+        containerXmlPath: var/cache/dev/App_KernelDevDebugContainer.xml
+    ignoreErrors:
+        # Convention Symfony/Doctrine : une relation ManyToOne non nullable en base
+        # est typée ?Entity côté PHP (état avant persistance) - c'est le standard
+        # généré par make:entity. Faux positif de l'extension Doctrine.
+        - identifier: doctrine.associationType

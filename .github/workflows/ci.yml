@@ -51,6 +51,11 @@ jobs:
       - name: Générer la paire de clés JWT
         run: php bin/console lexik:jwt:generate-keypair --overwrite --no-interaction
 
+      - name: Analyse statique (PHPStan)
+        run: |
+          php bin/console cache:warmup
+          vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+
       - name: Préparer la base de test
         run: |
           php bin/console doctrine:database:create --env=test --if-not-exists
