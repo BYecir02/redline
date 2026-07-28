@@ -6,7 +6,7 @@
 > **Auteur :** Badirou Mohamed Yecir
 > **Formation :** Bachelor 3 Développement - IPSSI
 > **Date :** [à compléter]
-> **Version :** 1.0
+> **Version :** 1.1
 
 ---
 
@@ -31,79 +31,75 @@ successives :
 2. **Modèle Logique de Données (MLD)** - traduction du MCD en modèle relationnel
    (tables, clés primaires, clés étrangères).
 3. **Modèle Physique de Données (MPD)** - implémentation concrète pour le SGBD
-   retenu, ici **PostgreSQL** (types SQL, contraintes, index).
+   retenu, ici **PostgreSQL**, telle que produite par l'ORM Doctrine.
 
-Cette progression du conceptuel vers le physique garantit que la base répond aux
-besoins fonctionnels tout en restant optimisée pour le SGBD.
+> **Note.** Les **tables** portent des noms français (`utilisateur`, `projet`…)
+> tandis que les **colonnes** suivent la convention Doctrine en anglais
+> `snake_case` (`password_hash`, `skill_id`…). Ce document reflète le schéma
+> réellement généré par les migrations.
 
 **Rôle de la base dans Redline.** Le moteur d'analyse est *stateless* : il analyse
-un fichier et renvoie un rapport, sans rien persister. La base de données ne sert
-donc **pas** à stocker le code, mais à conserver l'**historique des détections**
-dans le temps - afin d'alimenter les tendances, le temps moyen de résolution
-(MTTR) et le suivi des récurrences.
+un fichier et renvoie un rapport, sans rien persister. La base ne sert donc **pas**
+à stocker le code, mais à conserver l'**historique des détections** dans le temps -
+afin d'alimenter les tendances, le temps moyen de résolution (MTTR) et les
+récurrences.
 
 ---
 
 ## 2. Dictionnaire des données
 
-### Entité UTILISATEUR
+### Entité UTILISATEUR (table `utilisateur`)
 
-| Attribut | Signification | Type logique | Contraintes |
-|----------|---------------|--------------|-------------|
-| id_utilisateur | Identifiant unique du compte | Chaîne (cuid) | Clé primaire |
-| email | Adresse e-mail de connexion | Chaîne | Unique, non nul |
-| mot_de_passe_hash | Empreinte du mot de passe (jamais en clair) | Chaîne | Non nul |
-| date_creation | Date de création du compte | Horodatage | Non nul, défaut = maintenant |
+| Colonne | Signification | Type | Contraintes |
+|---------|---------------|------|-------------|
+| id | Identifiant unique du compte | Entier auto-incrémenté | Clé primaire |
+| email | Adresse e-mail de connexion | VARCHAR(255) | Unique, non nul |
+| password_hash | Empreinte du mot de passe (jamais en clair) | VARCHAR(255) | Non nul |
+| created_at | Date de création du compte | Horodatage | Non nul |
 
-### Entité PROJET
+### Entité PROJET (table `projet`)
 
-| Attribut | Signification | Type logique | Contraintes |
-|----------|---------------|--------------|-------------|
-| id_projet | Identifiant unique du dossier surveillé | Chaîne (cuid) | Clé primaire |
-| chemin | Chemin racine du dossier surveillé | Chaîne | Non nul, unique par utilisateur |
-| libelle | Nom d'affichage optionnel | Chaîne | Nullable |
-| date_creation | Date d'ajout du projet | Horodatage | Non nul, défaut = maintenant |
+| Colonne | Signification | Type | Contraintes |
+|---------|---------------|------|-------------|
+| id | Identifiant unique du dossier surveillé | Entier auto-incrémenté | Clé primaire |
+| user_id | Propriétaire du projet | Entier | Clé étrangère → utilisateur |
+| path | Chemin racine du dossier surveillé | VARCHAR(500) | Non nul, unique par utilisateur |
+| label | Nom d'affichage optionnel | VARCHAR(255) | Nullable |
+| skills | Règles activées pour ce projet | JSON (tableau) | Non nul |
+| excluded | Sous-dossiers exclus de la surveillance | JSON (tableau) | Non nul |
+| created_at | Date d'ajout du projet | Horodatage | Non nul |
 
-### Entité COMPETENCE_PROJET (skills activés)
+### Entité DETECTION (table `detection`)
 
-| Attribut | Signification | Type logique | Contraintes |
-|----------|---------------|--------------|-------------|
-| code_skill | Identifiant d'une règle activée (ex. `sql-injection`) | Chaîne | Partie de clé |
+| Colonne | Signification | Type | Contraintes |
+|---------|---------------|------|-------------|
+| id | Identifiant unique de la détection | Entier auto-incrémenté | Clé primaire |
+| project_id | Projet concerné | Entier | Clé étrangère → projet |
+| file | Fichier concerné (chemin relatif) | VARCHAR(500) | Non nul |
+| skill_id | Règle à l'origine de la détection | VARCHAR(100) | Non nul |
+| category | Catégorie (security / quality / reliability) | VARCHAR(20) | Non nul |
+| severity | Gravité (critical / warning / info) | VARCHAR(20) | Non nul |
+| line | Ligne du problème (1-indexée) | INTEGER | Non nul |
+| snippet | Contenu de la ligne fautive | TEXT | Non nul |
+| signature | Signature stable `fichier::skill::extrait` | TEXT | Unique par projet |
+| status | État de vie (ACTIVE / RESOLVED) | VARCHAR (enum PHP) | Non nul, défaut = ACTIVE |
+| ignored | Faux positif assumé par l'utilisateur | BOOLEAN | Non nul, défaut = faux |
+| first_seen_at | Première apparition | Horodatage | Non nul |
+| last_seen_at | Dernière apparition | Horodatage | Non nul |
+| resolved_at | Date de résolution | Horodatage | Nullable |
+| reopen_count | Nombre de réapparitions après résolution | INTEGER | Non nul, défaut = 0 |
 
-### Entité EXCLUSION_PROJET (sous-dossiers exclus)
+### Entité EVENEMENT_DETECTION (table `evenement_detection`)
 
-| Attribut | Signification | Type logique | Contraintes |
-|----------|---------------|--------------|-------------|
-| chemin_relatif | Sous-dossier exclu de la surveillance | Chaîne | Partie de clé |
-
-### Entité DETECTION
-
-| Attribut | Signification | Type logique | Contraintes |
-|----------|---------------|--------------|-------------|
-| id_detection | Identifiant unique de la détection | Chaîne (cuid) | Clé primaire |
-| fichier | Fichier concerné (chemin relatif) | Chaîne | Non nul |
-| id_skill | Règle à l'origine de la détection | Chaîne | Non nul |
-| categorie | Catégorie (security / quality / reliability) | Chaîne | Non nul |
-| severite | Gravité (critical / warning / info) | Chaîne | Non nul |
-| ligne | Ligne du problème (1-indexée) | Entier | Non nul |
-| extrait | Contenu de la ligne fautive | Chaîne | Non nul |
-| signature | Signature stable `fichier::skill::extrait` | Chaîne | Unique par projet |
-| statut | État de vie (ACTIVE / RESOLVED) | Énumération | Non nul, défaut = ACTIVE |
-| ignore | Faux positif assumé par l'utilisateur | Booléen | Non nul, défaut = faux |
-| date_premiere_vue | Première apparition | Horodatage | Non nul |
-| date_derniere_vue | Dernière apparition | Horodatage | Non nul |
-| date_resolution | Date de résolution | Horodatage | Nullable |
-| nb_reouvertures | Nombre de réapparitions après résolution | Entier | Non nul, défaut = 0 |
-
-### Entité EVENEMENT_DETECTION (journal horodaté)
-
-| Attribut | Signification | Type logique | Contraintes |
-|----------|---------------|--------------|-------------|
-| id_evenement | Identifiant unique de l'événement | Chaîne (cuid) | Clé primaire |
-| type | Nature de l'événement (APPEARED / RESOLVED / REOPENED) | Énumération | Non nul |
-| id_skill | Règle concernée (dénormalisé pour l'analytique) | Chaîne | Non nul |
-| severite | Gravité au moment de l'événement | Chaîne | Non nul |
-| date | Horodatage de l'événement | Horodatage | Non nul, défaut = maintenant |
+| Colonne | Signification | Type | Contraintes |
+|---------|---------------|------|-------------|
+| id | Identifiant unique de l'événement | Entier auto-incrémenté | Clé primaire |
+| project_id | Projet concerné | Entier | Clé étrangère → projet |
+| detection_id | Détection concernée | Entier | Clé étrangère → detection (nullable) |
+| type | Nature (APPEARED / RESOLVED / REOPENED) | VARCHAR (enum PHP) | Non nul |
+| skill_id | Règle concernée (dénormalisé pour l'analytique) | VARCHAR(100) | Non nul |
+| severity | Gravité au moment de l'événement | VARCHAR(20) | Non nul |
+| at | Horodatage de l'événement | Horodatage | Non nul |
 
 ---
 
@@ -111,11 +107,12 @@ dans le temps - afin d'alimenter les tendances, le temps moyen de résolution
 
 ### 3.1 Entités et associations
 
-Le domaine s'articule autour de quatre entités principales :
+Le domaine s'articule autour de **quatre entités** :
 
 - **UTILISATEUR** possède ses propres projets (données isolées par compte).
-- **PROJET** représente un dossier racine surveillé. Il active des règles
-  (COMPETENCE_PROJET) et peut exclure des sous-dossiers (EXCLUSION_PROJET).
+- **PROJET** représente un dossier racine surveillé. Ses règles activées (`skills`)
+  et sous-dossiers exclus (`excluded`) sont portés comme attributs multi-valués
+  (stockés en JSON, voir §6).
 - **DETECTION** est l'identité d'un problème détecté, avec son cycle de vie.
 - **EVENEMENT_DETECTION** est un journal horodaté (append-only) qui trace chaque
   apparition, résolution ou réouverture, pour alimenter les tendances.
@@ -125,8 +122,6 @@ Le domaine s'articule autour de quatre entités principales :
 | Association | Entité A | Cardinalité A | Entité B | Cardinalité B |
 |-------------|----------|---------------|----------|---------------|
 | possède | UTILISATEUR | (0,n) | PROJET | (1,1) |
-| active | PROJET | (0,n) | COMPETENCE_PROJET | (1,1) |
-| exclut | PROJET | (0,n) | EXCLUSION_PROJET | (1,1) |
 | contient | PROJET | (0,n) | DETECTION | (1,1) |
 | journalise | PROJET | (0,n) | EVENEMENT_DETECTION | (1,1) |
 | génère | DETECTION | (0,n) | EVENEMENT_DETECTION | (0,1) |
@@ -141,48 +136,46 @@ survivre à la suppression de sa détection, d'où le côté optionnel).
 ```mermaid
 erDiagram
     UTILISATEUR ||--o{ PROJET : "possède"
-    PROJET ||--o{ COMPETENCE_PROJET : "active"
-    PROJET ||--o{ EXCLUSION_PROJET : "exclut"
     PROJET ||--o{ DETECTION : "contient"
     PROJET ||--o{ EVENEMENT_DETECTION : "journalise"
     DETECTION |o--o{ EVENEMENT_DETECTION : "génère"
 
     UTILISATEUR {
-        string id_utilisateur PK
+        int id PK
         string email UK
-        string mot_de_passe_hash
-        datetime date_creation
+        string password_hash
+        datetime created_at
     }
     PROJET {
-        string id_projet PK
-        string chemin
-        string libelle
-        datetime date_creation
-    }
-    COMPETENCE_PROJET {
-        string code_skill
-    }
-    EXCLUSION_PROJET {
-        string chemin_relatif
+        int id PK
+        int user_id FK
+        string path
+        string label
+        json skills
+        json excluded
+        datetime created_at
     }
     DETECTION {
-        string id_detection PK
-        string fichier
-        string id_skill
-        string categorie
-        string severite
-        int ligne
+        int id PK
+        int project_id FK
+        string file
+        string skill_id
+        string category
+        string severity
+        int line
         string signature
-        string statut
-        boolean ignore
-        int nb_reouvertures
+        string status
+        boolean ignored
+        int reopen_count
     }
     EVENEMENT_DETECTION {
-        string id_evenement PK
+        int id PK
+        int project_id FK
+        int detection_id FK
         string type
-        string id_skill
-        string severite
-        datetime date
+        string skill_id
+        string severity
+        datetime at
     }
 ```
 
@@ -194,140 +187,116 @@ Traduction du MCD en tables relationnelles. Notation : `PK` = clé primaire,
 `FK` = clé étrangère.
 
 ```
-UTILISATEUR (id_utilisateur PK, email, mot_de_passe_hash, date_creation)
+UTILISATEUR (id PK, email, password_hash, created_at)
     UNIQUE (email)
 
-PROJET (id_projet PK, id_utilisateur FK -> UTILISATEUR, chemin, libelle,
-        date_creation)
-    UNIQUE (id_utilisateur, chemin)
+PROJET (id PK, user_id FK -> UTILISATEUR, path, label, skills, excluded,
+        created_at)
+    UNIQUE (user_id, path)
 
-COMPETENCE_PROJET (id_projet FK -> PROJET, code_skill)
-    PK (id_projet, code_skill)
+DETECTION (id PK, project_id FK -> PROJET, file, skill_id, category, severity,
+           line, snippet, signature, status, ignored, first_seen_at,
+           last_seen_at, resolved_at, reopen_count)
+    UNIQUE (project_id, signature)
 
-EXCLUSION_PROJET (id_projet FK -> PROJET, chemin_relatif)
-    PK (id_projet, chemin_relatif)
-
-DETECTION (id_detection PK, id_projet FK -> PROJET, fichier, id_skill, categorie,
-           severite, ligne, extrait, signature, statut, ignore,
-           date_premiere_vue, date_derniere_vue, date_resolution, nb_reouvertures)
-    UNIQUE (id_projet, signature)
-
-EVENEMENT_DETECTION (id_evenement PK, id_projet FK -> PROJET,
-                     id_detection FK -> DETECTION (nullable), type, id_skill,
-                     severite, date)
+EVENEMENT_DETECTION (id PK, project_id FK -> PROJET,
+                     detection_id FK -> DETECTION (nullable), type, skill_id,
+                     severity, at)
 ```
 
 **Règles de transformation appliquées :**
 
 - Chaque entité du MCD devient une table.
 - Les associations *(0,n) - (1,1)* sont traduites par une clé étrangère côté « n »
-  (PROJET porte `id_utilisateur` ; DETECTION porte `id_projet` ; etc.).
-- Les entités dépendantes multi-valuées (COMPETENCE_PROJET, EXCLUSION_PROJET) ont
-  une **clé primaire composite** `(id_projet, valeur)` garantissant l'unicité.
+  (PROJET porte `user_id` ; DETECTION porte `project_id` ; etc.).
+- Les attributs multi-valués (`skills`, `excluded`) sont portés directement par
+  PROJET sous forme de colonnes **JSON** (dénormalisation assumée, voir §6).
 - L'association optionnelle *DETECTION (0,n) - (0,1) EVENEMENT* donne une clé
-  étrangère **nullable** `id_detection` dans EVENEMENT_DETECTION.
+  étrangère **nullable** `detection_id` dans EVENEMENT_DETECTION.
 
 ---
 
 ## 5. Modèle Physique de Données (MPD)
 
-Implémentation pour **PostgreSQL**. Les identifiants sont des chaînes générées
-côté application (**cuid**), et non des `SERIAL`, afin de rester indépendant du
-SGBD et d'éviter les collisions en environnement distribué. Les énumérations
-métier sont implémentées via des **types ENUM PostgreSQL**.
+Implémentation pour **PostgreSQL**, telle que générée par les migrations Doctrine.
+Les identifiants sont des **entiers auto-incrémentés** (`GENERATED BY DEFAULT AS
+IDENTITY`). Les énumérations métier sont des **enums PHP** persistés en `VARCHAR`
+(la valeur textuelle : `ACTIVE`, `APPEARED`…), la validité étant garantie côté
+application.
 
 ```sql
--- Types énumérés
-CREATE TYPE detection_status AS ENUM ('ACTIVE', 'RESOLVED');
-CREATE TYPE event_type       AS ENUM ('APPEARED', 'RESOLVED', 'REOPENED');
-
 -- Utilisateur
 CREATE TABLE utilisateur (
-    id_utilisateur      VARCHAR(30)  PRIMARY KEY,
-    email               VARCHAR(255) NOT NULL UNIQUE,
-    mot_de_passe_hash   VARCHAR(255) NOT NULL,           -- bcrypt
-    date_creation       TIMESTAMPTZ  NOT NULL DEFAULT now()
+    id            INT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    email         VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,               -- bcrypt / argon2
+    created_at    TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL
 );
 
 -- Projet (dossier surveillé), unique par utilisateur
 CREATE TABLE projet (
-    id_projet           VARCHAR(30)  PRIMARY KEY,
-    id_utilisateur      VARCHAR(30)  NOT NULL
-        REFERENCES utilisateur(id_utilisateur) ON DELETE CASCADE,
-    chemin              TEXT         NOT NULL,
-    libelle             VARCHAR(255),
-    date_creation       TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    UNIQUE (id_utilisateur, chemin)
-);
-
--- Règles activées par projet
-CREATE TABLE competence_projet (
-    id_projet           VARCHAR(30)  NOT NULL
-        REFERENCES projet(id_projet) ON DELETE CASCADE,
-    code_skill          VARCHAR(60)  NOT NULL,
-    PRIMARY KEY (id_projet, code_skill)
-);
-
--- Sous-dossiers exclus par projet
-CREATE TABLE exclusion_projet (
-    id_projet           VARCHAR(30)  NOT NULL
-        REFERENCES projet(id_projet) ON DELETE CASCADE,
-    chemin_relatif      TEXT         NOT NULL,
-    PRIMARY KEY (id_projet, chemin_relatif)
+    id         INT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    user_id    INT NOT NULL REFERENCES utilisateur(id) ON DELETE CASCADE,
+    path       VARCHAR(500) NOT NULL,
+    label      VARCHAR(255),
+    skills     JSON NOT NULL,                          -- règles activées
+    excluded   JSON NOT NULL,                          -- sous-dossiers exclus
+    created_at TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL,
+    UNIQUE (user_id, path)
 );
 
 -- Détection (identité d'un problème + cycle de vie)
 CREATE TABLE detection (
-    id_detection        VARCHAR(30)      PRIMARY KEY,
-    id_projet           VARCHAR(30)      NOT NULL
-        REFERENCES projet(id_projet) ON DELETE CASCADE,
-    fichier             TEXT             NOT NULL,
-    id_skill            VARCHAR(60)      NOT NULL,
-    categorie           VARCHAR(20)      NOT NULL,
-    severite            VARCHAR(20)      NOT NULL,
-    ligne               INTEGER          NOT NULL,
-    extrait             TEXT             NOT NULL,
-    signature           TEXT             NOT NULL,
-    statut              detection_status NOT NULL DEFAULT 'ACTIVE',
-    ignore              BOOLEAN          NOT NULL DEFAULT false,
-    date_premiere_vue   TIMESTAMPTZ      NOT NULL DEFAULT now(),
-    date_derniere_vue   TIMESTAMPTZ      NOT NULL DEFAULT now(),
-    date_resolution     TIMESTAMPTZ,
-    nb_reouvertures     INTEGER          NOT NULL DEFAULT 0,
-    UNIQUE (id_projet, signature)
+    id             INT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    project_id     INT NOT NULL REFERENCES projet(id) ON DELETE CASCADE,
+    file           VARCHAR(500) NOT NULL,
+    skill_id       VARCHAR(100) NOT NULL,
+    category       VARCHAR(20)  NOT NULL,
+    severity       VARCHAR(20)  NOT NULL,
+    line           INTEGER      NOT NULL,
+    snippet        TEXT         NOT NULL,
+    signature      TEXT         NOT NULL,
+    status         VARCHAR(255) NOT NULL DEFAULT 'ACTIVE',   -- enum PHP DetectionStatus
+    ignored        BOOLEAN      NOT NULL DEFAULT false,
+    first_seen_at  TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL,
+    last_seen_at   TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL,
+    resolved_at    TIMESTAMP(0) WITHOUT TIME ZONE,
+    reopen_count   INTEGER      NOT NULL DEFAULT 0,
+    UNIQUE (project_id, signature)
 );
 
-CREATE INDEX idx_detection_projet_statut ON detection (id_projet, statut);
-CREATE INDEX idx_detection_skill         ON detection (id_skill);
+CREATE INDEX idx_detection_projet_statut ON detection (project_id, status);
+CREATE INDEX idx_detection_skill         ON detection (skill_id);
 
 -- Journal horodaté (append-only) alimentant les tendances
 CREATE TABLE evenement_detection (
-    id_evenement        VARCHAR(30)  PRIMARY KEY,
-    id_projet           VARCHAR(30)  NOT NULL
-        REFERENCES projet(id_projet) ON DELETE CASCADE,
-    id_detection        VARCHAR(30)
-        REFERENCES detection(id_detection) ON DELETE SET NULL,
-    type                event_type   NOT NULL,
-    id_skill            VARCHAR(60)  NOT NULL,
-    severite            VARCHAR(20)  NOT NULL,
-    date                TIMESTAMPTZ  NOT NULL DEFAULT now()
+    id           INT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    project_id   INT NOT NULL REFERENCES projet(id) ON DELETE CASCADE,
+    detection_id INT REFERENCES detection(id) ON DELETE SET NULL,
+    type         VARCHAR(255) NOT NULL,                     -- enum PHP EventType
+    skill_id     VARCHAR(100) NOT NULL,
+    severity     VARCHAR(20)  NOT NULL,
+    at           TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL
 );
 
-CREATE INDEX idx_evenement_projet_date ON evenement_detection (id_projet, date);
-CREATE INDEX idx_evenement_date        ON evenement_detection (date);
+CREATE INDEX idx_evenement_projet_date ON evenement_detection (project_id, at);
+CREATE INDEX idx_evenement_date        ON evenement_detection (at);
 ```
 
 ### Choix physiques justifiés
 
+- **Identifiants entiers auto-incrémentés** (`IDENTITY`) : standard Doctrine,
+  simples et performants pour les clés et jointures.
 - **`ON DELETE CASCADE`** sur PROJET et DETECTION : supprimer un utilisateur ou un
   projet purge automatiquement ses données rattachées (cohérence + RGPD).
-- **`ON DELETE SET NULL`** sur `evenement_detection.id_detection` : l'historique
+- **`ON DELETE SET NULL`** sur `evenement_detection.detection_id` : l'historique
   d'un événement (ex. résolution) est conservé même si la détection disparaît.
-- **Index** posés sur les colonnes de filtrage réel : `(id_projet, statut)` pour
-  lister les détections actives, `(id_projet, date)` et `(date)` pour tracer les
+- **Index** posés sur les colonnes de filtrage réel : `(project_id, status)` pour
+  lister les détections actives, `(project_id, at)` et `(at)` pour tracer les
   courbes de tendance efficacement.
-- **`TIMESTAMPTZ`** (avec fuseau) plutôt que `TIMESTAMP` pour un horodatage fiable
-  quel que soit le lieu du serveur.
+- **Énumérations en `VARCHAR`** : les enums PHP (`DetectionStatus`, `EventType`)
+  sont persistés par leur valeur textuelle ; la validité est garantie par le
+  typage applicatif plutôt que par un type ENUM PostgreSQL (portabilité accrue).
 
 ---
 
@@ -336,37 +305,34 @@ CREATE INDEX idx_evenement_date        ON evenement_detection (date);
 ### 6.1 Adéquation aux besoins fonctionnels
 
 - Un utilisateur peut surveiller plusieurs projets, chacun isolé (association
-  *possède*, contrainte d'unicité `(id_utilisateur, chemin)`).
+  *possède*, contrainte d'unicité `(user_id, path)`).
 - Une détection n'est pas recréée à chaque scan : elle est identifiée par une
-  **signature stable** `(id_projet, signature)` et mise à jour, ce qui permet de
+  **signature stable** `(project_id, signature)` et mise à jour, ce qui permet de
   suivre son cycle de vie (première vue, résolution, réouvertures).
 - Le journal EVENEMENT_DETECTION, en append-only, permet de reconstituer les
   **tendances** (apparitions / résolutions par période) et de calculer le **MTTR**
   (écart entre `APPEARED` et `RESOLVED`).
 
-### 6.2 Respect des formes normales (3NF)
+### 6.2 Formes normales et dénormalisation assumée
 
-- **1NF** - toutes les colonnes sont atomiques. Les listes multi-valuées de
-  l'application (règles activées, sous-dossiers exclus) sont **normalisées** en
-  tables dédiées (COMPETENCE_PROJET, EXCLUSION_PROJET) plutôt que stockées comme
-  attributs répétés.
-- **2NF** - aucun attribut ne dépend d'une partie seulement d'une clé composite
-  (les tables à clé composite ne contiennent que la clé elle-même).
-- **3NF** - aucun attribut non-clé ne dépend d'un autre attribut non-clé ; chaque
-  donnée est à sa place logique.
+Les entités principales (UTILISATEUR, PROJET, DETECTION, EVENEMENT_DETECTION)
+respectent la **3NF** : chaque attribut non-clé dépend de la clé, de toute la clé,
+et de rien d'autre que la clé.
 
-### 6.3 Note d'implémentation (transparence)
+**Exception assumée : les colonnes `skills` et `excluded`** de PROJET stockent des
+**listes en JSON**, ce qui déroge à la 1re forme normale (atomicité). Ce choix est
+**délibéré** : ces listes ne sont lues/écrites qu'en bloc (rejouer la configuration
+d'un projet en un seul accès), jamais requêtées transversalement. La normalisation
+« classique » consisterait à créer deux tables associatives
+`COMPETENCE_PROJET(project_id, code_skill)` et `EXCLUSION_PROJET(project_id,
+chemin)` ; elle reste possible et directe si un besoin de requêtage par règle
+apparaît, mais alourdirait inutilement le modèle pour l'usage réel.
 
-Dans l'implémentation actuelle (ORM Prisma / PostgreSQL), les règles activées et
-les sous-dossiers exclus sont physiquement stockés sous forme de **tableaux
-PostgreSQL** (`text[]`) directement dans la table PROJET, par simplicité de
-lecture/écriture. Ce choix est une **dénormalisation assumée** : elle optimise le
-cas d'usage réel (rejouer la configuration d'un projet en un seul accès) au prix
-d'une entorse à la 1NF. Le modèle présenté ci-dessus est la **version normalisée
-de référence** ; la migration vers les tables COMPETENCE_PROJET / EXCLUSION_PROJET
-est directe si un besoin de requêtage transversal sur les règles apparaît.
+Cette décision illustre un arbitrage courant : **normaliser ce qui est requêté,
+dénormaliser ce qui est manipulé en bloc.**
 
 ---
 
-*Document rédigé dans le cadre du Jalon 3. Il constitue le chapitre VI du rapport
-final et sert de fondation à la conception back-end (entités et ORM).*
+*Document rédigé dans le cadre du Jalon 3, aligné sur le schéma Doctrine réellement
+généré. Il constitue le chapitre VI du rapport final et sert de fondation à la
+conception back-end (entités et ORM).*
