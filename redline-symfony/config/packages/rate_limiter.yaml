@@ -1,0 +1,8 @@
+framework:
+    rate_limiter:
+        # Anti-brute-force sur la connexion : 5 tentatives échouées / 15 min / IP.
+        # Les connexions RÉUSSIES ne consomment pas de jeton (voir AuthController).
+        login:
+            policy: 'sliding_window'
+            limit: 5
+            interval: '15 minutes'
