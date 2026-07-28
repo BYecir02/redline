@@ -10,6 +10,7 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
+use Symfony\Component\RateLimiter\RateLimiterFactory;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\CurrentUser;
 
@@ -60,15 +61,27 @@ class AuthController extends AbstractController
         UserRepository $users,
         UserPasswordHasherInterface $hasher,
         JWTTokenManagerInterface $jwt,
+        RateLimiterFactory $loginLimiter,
     ): JsonResponse {
         $data = json_decode($request->getContent(), true) ?? [];
         $email = trim((string) ($data['email'] ?? ''));
         $password = (string) ($data['password'] ?? '');
 
+        // Anti-brute-force : seuls les ÉCHECS consomment un jeton. Une connexion
+        // valide (crédentiels vérifiés avant) n'est jamais bloquée et remet le
+        // compteur à zéro. Au-delà du quota d'échecs pour cette IP → 429.
+        $limiter = $loginLimiter->create($request->getClientIp() ?? 'anon');
+
         $user = $email !== '' ? $users->findOneBy(['email' => $email]) : null;
         if ($user === null || !$hasher->isPasswordValid($user, $password)) {
+            if (!$limiter->consume(1)->isAccepted()) {
+                return $this->json(['error' => 'Trop de tentatives de connexion. Réessayez plus tard.'], 429);
+            }
+
             return $this->json(['error' => 'Email ou mot de passe incorrect.'], 401);
         }
+
+        $limiter->reset();
 
         return $this->json([
             'token' => $jwt->create($user),
