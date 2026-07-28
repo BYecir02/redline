@@ -6,7 +6,7 @@
 > **Auteur :** Badirou Mohamed Yecir
 > **Formation :** Bachelor 3 Développement - IPSSI
 > **Date :** [à compléter]
-> **Version :** 1.0
+> **Version :** 1.1
 
 ---
 
@@ -28,16 +28,15 @@
 
 ## 1. Approche et périmètre
 
-La sécurité de Redline est traitée selon le référentiel **OWASP Top 10**, qui
-recense les risques applicatifs les plus critiques. Chaque mesure ci-dessous
-indique honnêtement son **statut réel** : implémentée, partielle, ou à implémenter.
+La sécurité de Redline est traitée selon le référentiel **OWASP Top 10**. Chaque
+mesure ci-dessous indique honnêtement son statut réel. L'analyse porte sur le
+backend **Symfony** (API), le front **React** et le moteur d'analyse Node.
 
 **Particularité du projet.** Redline est lui-même un outil de détection de failles
-de sécurité dans le code. Plusieurs de ses règles (`sql-injection`,
-`hardcoded-secret`, `xss-risk`, `cors-wildcard`) correspondent directement à des
-catégories OWASP. L'application s'applique donc à elle-même les principes qu'elle
-vérifie chez les autres - une cohérence qui constitue un fil conducteur de cette
-analyse.
+de sécurité. Plusieurs de ses règles (`sql-injection`, `hardcoded-secret`,
+`xss-risk`, `cors-wildcard`) correspondent à des catégories OWASP : l'application
+applique à son propre code les principes qu'elle vérifie chez les autres - un fil
+conducteur de cette analyse.
 
 ---
 
@@ -45,14 +44,14 @@ analyse.
 
 | # | Catégorie OWASP | Traitement dans Redline | Statut |
 |---|-----------------|-------------------------|--------|
-| A01 | Broken Access Control | Middleware d'authentification + isolation des données par utilisateur (Voters côté Symfony) | ✅ |
-| A02 | Cryptographic Failures | Mots de passe hachés (bcrypt), JWT signé, HTTPS en production | ✅ |
-| A03 | Injection | ORM à requêtes paramétrées (Prisma / Doctrine), échappement automatique des vues | ✅ |
-| A04 | Insecure Design | Moteur *stateless*, séparation des couches, garde-fous (limite de tentatives) | ✅ |
-| A05 | Security Misconfiguration | CORS à restreindre en production, en-têtes de sécurité à ajouter | 🟡 |
-| A06 | Vulnerable Components | Gestion des dépendances + audit automatisé en CI | 🟡 |
-| A07 | Identification & Auth Failures | JWT + bcrypt ; limitation anti-brute-force à ajouter | 🟡 |
-| A08 | Data Integrity Failures | Signature des JWT, dépendances verrouillées (lockfile) | ✅ |
+| A01 | Broken Access Control | Firewall Symfony (JWT) + `access_control` + données isolées par utilisateur | ✅ |
+| A02 | Cryptographic Failures | Mots de passe hachés (bcrypt/argon2), JWT signé (RS256), HTTPS en production | ✅ |
+| A03 | Injection | Doctrine ORM + DBAL à requêtes paramétrées (aucune concaténation SQL) | ✅ |
+| A04 | Insecure Design | Moteur *stateless*, séparation en couches, garde-fou anti-brute-force | ✅ |
+| A05 | Security Misconfiguration | CORS restreint (Nelmio) + en-têtes de sécurité HTTP | ✅ |
+| A06 | Vulnerable Components | Dépendances verrouillées (lockfiles) ; audit CI à ajouter | 🟡 |
+| A07 | Identification & Auth Failures | JWT + hachage + **rate limiter anti-brute-force** | ✅ |
+| A08 | Data Integrity Failures | Signature RSA des JWT, dépendances verrouillées | ✅ |
 | A09 | Logging & Monitoring Failures | Journalisation applicative à renforcer | 🟡 |
 | A10 | Server-Side Request Forgery | Non applicable (pas de requêtes serveur pilotées par l'utilisateur) | - |
 
@@ -60,17 +59,14 @@ analyse.
 
 ## 3. Injection SQL
 
-**Risque.** Construction de requêtes SQL par concaténation d'entrées utilisateur,
-permettant l'exécution de code SQL malveillant.
+**Risque.** Requêtes SQL construites par concaténation d'entrées utilisateur.
 
-**Mesure.** Aucune requête SQL n'est écrite par concaténation. L'accès aux données
-passe exclusivement par un **ORM à requêtes paramétrées** : Prisma dans
-l'implémentation actuelle, **Doctrine** dans la cible Symfony. Les entrées
-utilisateur sont toujours transmises comme paramètres liés, jamais interpolées
-dans une chaîne SQL.
+**Mesure.** Aucune requête n'est écrite par concaténation. L'accès aux données
+passe par **Doctrine ORM** (requêtes paramétrées) ; les agrégations analytiques
+utilisent **Doctrine DBAL** avec des **paramètres liés** (`:uid`, `:path`…),
+jamais d'interpolation d'entrée utilisateur dans le SQL.
 
-**Cohérence produit.** Redline embarque une règle `sql-injection` (sévérité
-critique) qui détecte précisément ce motif dans le code analysé.
+**Cohérence produit.** La règle `sql-injection` (critique) détecte ce motif.
 
 **Statut : ✅ implémenté.**
 
@@ -78,19 +74,16 @@ critique) qui détecte précisément ce motif dans le code analysé.
 
 ## 4. XSS (Cross-Site Scripting)
 
-**Risque.** Injection de HTML/JavaScript non filtré dans les pages, permettant
-l'exécution de scripts arbitraires.
+**Risque.** Injection de HTML/JavaScript non filtré dans les pages.
 
-**Mesure.** L'interface est construite en **React**, qui **échappe automatiquement**
-toute valeur insérée dans le JSX. Une vérification du code (`grep` sur
-`dangerouslySetInnerHTML` / `innerHTML`) confirme qu'**aucune injection HTML brute
-n'est utilisée dans l'application** : les seules occurrences de ces termes se
-trouvent dans les *données de démonstration* décrivant la faille que Redline
-détecte, et non dans du code exécuté. Côté cible Symfony, **Twig** échappe les
-variables par défaut.
+**Mesure.** L'interface **React** échappe automatiquement toute valeur insérée dans
+le JSX. Une vérification (`grep` sur `dangerouslySetInnerHTML` / `innerHTML`)
+confirme qu'aucune injection HTML brute n'est utilisée : les seules occurrences se
+trouvent dans les *données de démonstration* décrivant la faille détectée. L'API
+Symfony ne renvoie que du **JSON** (pas de rendu HTML côté serveur).
 
-**Cohérence produit.** Redline embarque une règle `xss-risk` qui signale l'usage de
-`innerHTML` / `dangerouslySetInnerHTML`.
+**Cohérence produit.** La règle `xss-risk` signale l'usage de `innerHTML` /
+`dangerouslySetInnerHTML`.
 
 **Statut : ✅ implémenté.**
 
@@ -98,20 +91,17 @@ variables par défaut.
 
 ## 5. CSRF
 
-**Risque.** Soumission frauduleuse d'une requête authentifiée depuis un site tiers,
-en exploitant les cookies envoyés automatiquement par le navigateur.
+**Risque.** Soumission frauduleuse d'une requête authentifiée via les cookies
+envoyés automatiquement par le navigateur.
 
 **Mesure.** L'authentification n'utilise **pas de cookie de session** : le jeton
-JWT est transmis explicitement dans l'en-tête `Authorization: Bearer <token>`.
-Comme le navigateur n'attache pas ce jeton automatiquement aux requêtes
-inter-sites, la surface d'attaque CSRF est **structurellement neutralisée** pour
-l'API.
+JWT est transmis dans l'en-tête `Authorization: Bearer <token>`. Le navigateur ne
+l'attache pas automatiquement aux requêtes inter-sites : la surface CSRF est
+**structurellement neutralisée**.
 
 **Contrepartie assumée.** Ce choix (jeton en `localStorage` + en-tête) échange
-l'immunité CSRF contre une sensibilité au **vol de jeton par XSS**. Cette
-contrepartie est acceptable car le vecteur XSS est lui-même fermé (§4). Côté cible
-Symfony, tout formulaire à rendu serveur serait protégé par les **jetons CSRF
-natifs de Symfony**.
+l'immunité CSRF contre une sensibilité au vol de jeton par XSS - vecteur lui-même
+fermé (§4).
 
 **Statut : ✅ maîtrisé (par conception).**
 
@@ -119,18 +109,18 @@ natifs de Symfony**.
 
 ## 6. Authentification et mots de passe
 
-**Mesure.** Les mots de passe ne sont **jamais stockés en clair**. Ils sont hachés
-avec **bcrypt** (algorithme robuste avec sel intégré), à un coût de **10 rounds**
-(minimum recommandé par l'OWASP). Le mot de passe en clair ne quitte pas la couche
-de hachage.
+**Mesure.** Les mots de passe ne sont **jamais stockés en clair** : ils sont hachés
+via le *password hasher* de Symfony configuré en **`auto`** (bcrypt/argon2 selon la
+plateforme, sel intégré).
 
-L'authentification repose sur des **JWT signés (HS256)** qui ne transportent que
-l'identifiant de l'utilisateur (`sub`) - aucune donnée sensible - et **expirent**
-(durée configurable, 7 jours par défaut). La confiance repose entièrement sur la
-signature, protégée par un secret en variable d'environnement.
+L'authentification repose sur des **JWT signés en RS256** (algorithme asymétrique) :
+émis avec une **clé privée**, vérifiés avec une **clé publique** (LexikJWT). Le
+jeton ne transporte que l'identité de l'utilisateur et **expire**. La clé privée
+n'est jamais versionnée (voir §8).
 
-**Amélioration prévue.** Passer bcrypt à un coût supérieur (12+) avec un binding
-natif, et envisager Argon2.
+**Anti-brute-force.** La connexion est protégée par un **rate limiter** (5 échecs
+par IP en 15 minutes → `429`), remis à zéro sur connexion réussie (une connexion
+valide n'est jamais bloquée). *Vérifié par test manuel.*
 
 **Statut : ✅ implémenté.**
 
@@ -138,15 +128,16 @@ natif, et envisager Argon2.
 
 ## 7. Contrôle d'accès et isolation
 
-**Mesure.** Toutes les routes sensibles sont protégées par un **middleware
-d'authentification** (`requireAuth`) qui rejette (401) toute requête sans jeton
-valide. Les données sont **isolées par utilisateur** : chaque projet, détection et
-statistique est rattaché à un `userId`, et les requêtes sont systématiquement
-filtrées par le propriétaire. Un utilisateur ne peut donc jamais accéder aux
+**Mesure.** L'accès est régi par le **firewall Symfony** (stateless, authentifié
+par JWT) et les règles `access_control` : `/api/auth` et `/api/skills` sont
+publics, **tout le reste exige un jeton valide** (sinon `401`). Les données sont
+**isolées par utilisateur** : chaque projet, détection et statistique est rattaché
+à un `user_id`, et **toutes les requêtes de lecture sont scopées par le
+propriétaire** (`WHERE user_id = :uid`). Un utilisateur ne peut jamais accéder aux
 données d'un autre compte.
 
-Côté cible Symfony, ce contrôle serait renforcé par des **Voters** (autorisation
-fine par ressource).
+*Le contrôle d'accès (401 sans jeton, isolation) est couvert par des tests
+automatisés.*
 
 **Statut : ✅ implémenté.**
 
@@ -154,39 +145,41 @@ fine par ressource).
 
 ## 8. Gestion des secrets
 
-**Mesure.** Les secrets (secret de signature JWT, chaîne de connexion à la base,
-clés d'API) sont gérés via des **variables d'environnement** (fichiers `.env`),
-**jamais codés en dur** dans le code source. Le fichier `.env` est exclu du dépôt
-Git (`.gitignore`) ; un `.env.example` documente les variables attendues sans
-révéler de valeur.
+**Mesure.** Les secrets sont gérés hors du code :
+- la **clé privée JWT** (`config/jwt/*.pem`) est **exclue du dépôt** (`.gitignore`)
+  et régénérée par environnement ;
+- les surcharges locales sensibles vont dans **`.env.local`** (exclu du dépôt) ;
+- les identifiants de base et l'URL du moteur sont injectés par **Docker Compose** ;
+- la **clé API d'IA vient de l'utilisateur** à l'exécution, jamais stockée.
 
-**Cohérence produit.** Redline embarque une règle `hardcoded-secret` (sévérité
-critique) détectant les clés/mots de passe en clair dans le code.
+Le fichier `.env` versionné ne contient **aucun secret exploitable** (valeurs par
+défaut de développement, passphrase JWT vide, clé privée absente du dépôt).
 
-**À faire pour la production.** Régénérer le `JWT_SECRET` (le secret de
-développement ne doit jamais servir en production).
+**Cohérence produit.** La règle `hardcoded-secret` (critique) détecte les
+clés/mots de passe en clair dans le code.
 
-**Statut : ✅ implémenté** (avec régénération à prévoir pour la prod).
+**À faire pour la production.** Régénérer la paire de clés JWT et utiliser une base
+de données managée avec des identifiants dédiés.
+
+**Statut : ✅ implémenté.**
 
 ---
 
 ## 9. Données personnelles et RGPD
 
-**Données manipulées.** L'application stocke une **adresse e-mail** et un
-**mot de passe haché** par compte, ainsi que des **extraits de code** (lignes
-fautives) dans l'historique des détections.
+**Données manipulées.** Une **adresse e-mail** et un **mot de passe haché** par
+compte, ainsi que des **extraits de code** (lignes fautives) dans l'historique.
 
 **Mesures.**
-- Les mots de passe sont **hachés** (jamais lisibles).
-- Le modèle de données prévoit la **suppression en cascade** (`ON DELETE CASCADE`) :
-  supprimer un compte purge automatiquement l'ensemble de ses projets, détections
-  et événements.
-- Les communications sont prévues en **HTTPS** en production.
+- Mots de passe **hachés** (jamais lisibles).
+- **Suppression en cascade** (`ON DELETE CASCADE`) : supprimer un compte purge
+  automatiquement ses projets, détections et événements.
+- Communications prévues en **HTTPS** en production.
 
 **À compléter.**
-- Exposer une action **self-service de suppression de compte** dans l'interface
-  (le modèle la permet déjà techniquement).
-- Rédiger une **politique de confidentialité** simplifiée accessible dans l'app.
+- Exposer une action **self-service de suppression de compte** (le modèle le permet
+  déjà techniquement).
+- Rédiger une **politique de confidentialité** simplifiée dans l'application.
 
 **Statut : 🟡 partiel** (fondations en place, self-service et mentions légales à
 ajouter).
@@ -195,19 +188,25 @@ ajouter).
 
 ## 10. Configuration : CORS et en-têtes HTTP
 
-**État actuel (transparence).** En développement, l'API autorise toutes les
-origines (`Access-Control-Allow-Origin: *`) pour faciliter le travail front/back
-en local. **Ce réglage ne doit pas être conservé en production.**
+**CORS.** Le front (origine distincte) accède à l'API grâce à **NelmioCorsBundle**,
+configuré pour n'autoriser que les origines de développement (`localhost` sur tout
+port) via une expression régulière, avec les méthodes et en-têtes nécessaires
+(`Authorization`, `Content-Type`). En production, il suffit de restreindre
+`CORS_ALLOW_ORIGIN` à l'origine réelle du front déployé. **Il ne s'agit donc pas
+d'un `Access-Control-Allow-Origin: *`.**
 
-**Mesure prévue.** Restreindre le CORS à l'origine du front déployé, et ajouter les
-en-têtes de sécurité HTTP standards : `X-Frame-Options` (anti-clickjacking),
-`X-Content-Type-Options`, `Content-Security-Policy`, `Strict-Transport-Security`.
+**En-têtes de sécurité HTTP.** Un *event subscriber* (`SecurityHeadersSubscriber`)
+ajoute à **toutes les réponses** :
+- `X-Content-Type-Options: nosniff` (anti-sniffing MIME) ;
+- `X-Frame-Options: DENY` (anti-clickjacking) ;
+- `Referrer-Policy: no-referrer`.
 
-**Cohérence produit.** Redline embarque une règle `cors-wildcard` qui détecte
-exactement ce `Access-Control-Allow-Origin: *` - l'outil signale donc sa propre
-configuration de développement, ce qui illustre concrètement son utilité.
+*CORS (preflight) et en-têtes vérifiés par test manuel.*
 
-**Statut : 🟡 à durcir pour la production.**
+**Cohérence produit.** La règle `cors-wildcard` détecte justement les
+configurations `Access-Control-Allow-Origin: *` - que Redline évite chez lui.
+
+**Statut : ✅ implémenté** (durcissement prod = restreindre l'origine).
 
 ---
 
@@ -217,34 +216,34 @@ configuration de développement, ce qui illustre concrètement son utilité.
 
 | Mesure | Statut |
 |--------|--------|
-| Hachage des mots de passe (bcrypt, 10 rounds) | ✅ |
-| Authentification par JWT signé et expirant | ✅ |
-| Protection contre l'injection SQL (ORM paramétré) | ✅ |
-| Protection contre le XSS (échappement automatique, aucun sink HTML) | ✅ |
+| Hachage des mots de passe (bcrypt/argon2, hasher `auto`) | ✅ |
+| Authentification JWT signée (RS256, clé privée hors dépôt) et expirante | ✅ |
+| Protection contre l'injection SQL (Doctrine ORM + DBAL paramétré) | ✅ |
+| Protection contre le XSS (échappement React, aucun sink HTML) | ✅ |
 | Maîtrise du CSRF (jeton en en-tête, pas de cookie de session) | ✅ |
-| Contrôle d'accès et isolation des données par utilisateur | ✅ |
-| Secrets en variables d'environnement | ✅ |
+| Contrôle d'accès (firewall + `access_control`) et isolation par utilisateur | ✅ |
+| **CORS restreint** (Nelmio) et **en-têtes de sécurité HTTP** | ✅ |
+| **Anti-brute-force** sur la connexion (rate limiter) | ✅ |
+| Secrets hors dépôt (clé privée JWT, `.env.local`) | ✅ |
 | Suppression des données en cascade (base RGPD) | ✅ |
 
 ### Axes d'amélioration identifiés
 
 | Amélioration | Priorité |
 |--------------|----------|
-| Restreindre le CORS et ajouter les en-têtes de sécurité HTTP | Haute |
-| Limitation anti-brute-force sur la connexion (Rate Limiter) | Haute |
 | Suppression de compte self-service + politique de confidentialité | Moyenne |
-| Passage de bcrypt à un coût 12+ / Argon2 | Moyenne |
+| Passage explicite à Argon2 / coût de hachage supérieur | Moyenne |
 | Audit automatisé des dépendances en CI | Moyenne |
 | Journalisation et surveillance renforcées | Basse |
 
-**Conclusion.** Les fondations de sécurité (authentification, hachage, isolation,
-protection injection/XSS/CSRF) sont **en place et fonctionnelles**. Les points
-restants relèvent du **durcissement pour la mise en production** (configuration,
-anti-brute-force, RGPD self-service) et sont clairement identifiés. La démarche est
-d'autant plus cohérente que l'outil applique à son propre code les règles de
-sécurité qu'il détecte.
+**Conclusion.** La sécurité est **implémentée et fonctionnelle** sur l'essentiel du
+Top 10 OWASP : authentification robuste, contrôle d'accès, isolation des données,
+protection injection/XSS/CSRF, CORS restreint, en-têtes de sécurité et
+anti-brute-force. Les points restants relèvent surtout de la **conformité RGPD**
+(self-service) et de l'**observabilité**. La démarche est d'autant plus cohérente
+que l'outil applique à son propre code les règles qu'il détecte.
 
 ---
 
-*Document rédigé dans le cadre du Jalon 5. Il constitue le chapitre IX (Sécurité)
-du rapport final.*
+*Document rédigé dans le cadre du Jalon 5, aligné sur l'implémentation Symfony
+réelle. Il constitue le chapitre IX (Sécurité) du rapport final.*
