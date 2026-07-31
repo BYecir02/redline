@@ -53,7 +53,7 @@ services:
   # Moteur d'analyse (Node / ESLint) : service interne appelé par Symfony.
   # Aucune auth, aucune base - il ne fait qu'analyser du code et renvoyer un rapport.
   engine:
-    build: ./redline-backend
+    build: ./redline-express
     container_name: redline-engine
     restart: unless-stopped
     ports:

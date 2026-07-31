@@ -1,5 +1,5 @@
 {
-  "name": "redline-backend-express",
+  "name": "redline-express",
   "version": "0.1.0",
   "description": "Moteur de revue de code généré par IA — backend Express (analyse par skills + boucle de correction)",
   "type": "module",
