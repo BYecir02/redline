@@ -18,7 +18,7 @@ build/
 
 # ---- Environnement & secrets (NE JAMAIS committer) ----
 # Secrets du moteur Node (JWT_SECRET, identifiants BDD)
-/redline-backend/.env
+/redline-express/.env
 # Fichiers d'environnement locaux (secrets) - partout, tous projets
 .env.local
 .env.*.local

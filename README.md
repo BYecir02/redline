@@ -1,20 +1,19 @@
 # Redline
 
-**Outil de revue de code généré par IA.** Redline surveille en continu le code
-produit par un assistant IA (Cursor, Copilot…), l'analyse contre des règles
-regroupées en *skills* (sécurité, qualité, robustesse), et génère un **prompt
-correctif structuré** à renvoyer à l'IA — jusqu'à ce que le code soit propre.
+**Outil de revue de code généré par IA.** Redline analyse le code produit par un
+assistant IA (Cursor, Copilot...), le confronte à des règles regroupées en
+*skills* (sécurité, qualité, robustesse), et génère un **prompt correctif
+structuré** à renvoyer à l'IA, jusqu'à ce que le code soit propre.
 
-> Projet double usage : soutenance de fin d'année (bac+4 Dev Data & IA, IPSSI) et
-> démonstration de compétences pour une alternance « Développeur Full-Stack
-> augmenté par l'IA » (orchestration d'agents de dev IA + garde-fous qualité).
+> Projet fil rouge de fin d'année - Bachelor 3 Développement, IPSSI
+> (certification Concepteur Développeur d'Applications).
 
 ---
 
 ## Sommaire
 
 - [Principe](#principe)
-- [Architecture](#architecture)
+- [Architecture : deux backends, un moteur](#architecture--deux-backends-un-moteur)
 - [Stack technique](#stack-technique)
 - [Structure du dépôt](#structure-du-dépôt)
 - [Démarrage rapide](#démarrage-rapide)
@@ -22,7 +21,7 @@ correctif structuré** à renvoyer à l'IA — jusqu'à ce que le code soit prop
 - [API backend](#api-backend)
 - [Modèle de données](#modèle-de-données)
 - [Scripts utiles](#scripts-utiles)
-- [État & feuille de route](#état--feuille-de-route)
+- [État et feuille de route](#état-et-feuille-de-route)
 
 ---
 
@@ -30,141 +29,165 @@ correctif structuré** à renvoyer à l'IA — jusqu'à ce que le code soit prop
 
 Le parcours utilisateur se déroule en deux temps :
 
-1. **Configuration (wizard)** — on connecte un ou plusieurs dossiers, on confirme
-   la stack détectée, on choisit les sous-dossiers à surveiller, on renseigne une
+1. **Configuration (wizard)** - on choisit un dossier de code, on confirme la
+   stack détectée, on sélectionne les sous-dossiers à surveiller, on renseigne une
    clé API (optionnelle, pour l'analyse contextuelle par IA), et on active les
    skills pertinents.
-2. **Surveillance (dashboard temps réel)** — Redline observe les fichiers, fait
-   remonter les alertes groupées par skill et par sévérité, trace les tendances,
-   et permet de sélectionner des alertes pour **générer un prompt de correction**
-   à copier vers l'assistant IA.
+2. **Analyse (dashboard)** - Redline analyse les fichiers, fait remonter les
+   alertes groupées par skill et par sévérité, trace les tendances, et permet de
+   sélectionner des alertes pour **générer un prompt de correction** à copier vers
+   l'assistant IA.
 
-Le point clé de conception : le **moteur d'analyse est découplé du framework**.
-Ajouter le support d'un nouveau langage ou framework revient à ajouter un module
-de skill, sans toucher au cœur (orchestration, watcher, génération de prompt).
+## Architecture : deux backends, un moteur
 
-## Architecture
+Le principe de conception central de Redline est le **découplage du moteur
+d'analyse**. Pour le démontrer concrètement, le projet fournit **deux backends
+interchangeables** exposant la même API autour du **même moteur d'analyse** :
+
+```
+                    ┌──────────────────────────┐
+                    │   Front React (Vite)      │
+                    │   lit les fichiers côté    │
+                    │   navigateur (File System) │
+                    └────────────┬─────────────┘
+                                 │  API REST (VITE_API_URL)
+              ┌──────────────────┴──────────────────┐
+              ▼                                      ▼
+   ┌────────────────────┐                ┌────────────────────┐
+   │  redline-express    │                │  redline-symfony    │
+   │  Node / Express      │                │  Symfony 7 / PHP     │
+   │  Prisma · JWT        │                │  Doctrine · LexikJWT │
+   │  port 3001           │                │  port 8000           │
+   └─────────┬──────────┘                └─────────┬──────────┘
+             │ moteur en interne                    │ moteur en HTTP (:4000)
+             ▼                                      ▼
+        ┌───────────────────────────────────────────────┐
+        │   Moteur d'analyse : ESLint + skills           │
+        │   (redline-express/src/engine + src/skills)    │
+        └───────────────────────────────────────────────┘
+```
+
+- **`redline-express`** - le backend **d'origine**, en Node/Express, complet
+  (authentification JWT, persistance Prisma, routes, surveillance temps réel). Il
+  embarque le moteur d'analyse **en interne** (même processus). Port `3001`.
+- **`redline-symfony`** - le **même périmètre d'API** réécrit en **Symfony / PHP**,
+  imposé par l'école pour la certification CDA. Comme PHP ne peut pas exécuter
+  ESLint (un outil Node), Symfony appelle le moteur en **micro-service HTTP**. Port
+  `8000`.
+- **Le moteur d'analyse** (ESLint + skills) est **partagé** : le même code sert en
+  interne à Express et est exposé par `redline-express/src/engine-server.ts`
+  (`POST /analyze`, port `4000`) pour Symfony.
+
+Résultat : **on change de framework backend sans toucher ni au front, ni au
+moteur.** C'est la démonstration vivante du découplage.
 
 ### Règles en couches (« skills »)
 
 Chaque skill est une **règle ESLint + ses métadonnées de domaine** (catégorie,
-sévérité, stacks ciblées). Elles s'empilent en trois niveaux indépendants et
-enfichables :
+sévérité, stacks ciblées), empilées en trois niveaux enfichables :
 
-- **Niveau 1 — universel** (langage-agnostique) : secrets en dur, TODO/FIXME,
-  absence de gestion d'erreurs…
-- **Niveau 2 — spécifique langage** (JS/TS) : `console.log` oubliés, imports
-  inutilisés…
-- **Niveau 3 — spécifique framework** (Express, React…) : CORS trop permissif,
-  XSS via `innerHTML`/`dangerouslySetInnerHTML`…
+- **Niveau 1 - universel** (langage-agnostique) : secrets en dur, TODO/FIXME,
+  absence de gestion d'erreurs...
+- **Niveau 2 - spécifique langage** (JS/TS) : `console.log` oubliés, imports
+  inutilisés...
+- **Niveau 3 - spécifique framework** (Express, React...) : CORS trop permissif,
+  XSS via `innerHTML` / `dangerouslySetInnerHTML`...
 
-Le registre des skills (`backend/src/skills/index.ts`) est la **seule** surface
-que le moteur connaît : `analyzer.ts` monte les règles sélectionnées comme un
-plugin ESLint à la volée (flat config 100 % en mémoire) et traduit les messages
-en un contrat JSON stable (`ScanReport`) consommé tel quel par le front.
-
-### Flux de surveillance
-
-```
-Dossier surveillé ──(chokidar)──▶ Watcher ──▶ analyzer (ESLint) ──▶ ScanReport
-                                     │                                   │
-                                     │                          persistance Postgres
-                                     │                          (historique / tendances)
-                                     ▼
-                              flux SSE (/watch/stream) ──▶ Dashboard React (alertes live)
-                                                                  │
-                                                    sélection d'alertes ──▶ prompt correctif
-```
-
-La boucle de correction **100 % automatique** (analyse → prompt → appel IA →
-re-analyse, avec garde-fou `maxAttempts`) existe dans le code
-(`engine/loop.ts`) mais est **volontairement mise de côté** : le flux actuel
-s'arrête à la génération du prompt, que l'utilisateur applique lui-même via sa
-session IA.
+Le registre des skills (`redline-express/src/skills/index.ts`) est la **seule**
+surface que le moteur connaît : l'analyzer monte les règles sélectionnées comme un
+plugin ESLint à la volée (flat config en mémoire) et traduit les messages en un
+contrat JSON stable (`ScanReport`), consommé tel quel par les backends puis le
+front.
 
 ## Stack technique
 
-| Couche       | Technologies                                                        |
-| ------------ | ------------------------------------------------------------------- |
-| **Frontend** | React 18 · Vite 6 · TypeScript · Tailwind 4 · Recharts · lucide-react |
-| **Backend**  | Node.js ≥ 20 · Express 4 · TypeScript (ESM, `tsx`)                   |
-| **Moteur**   | ESLint 9 (flat config en mémoire) · `@typescript-eslint/parser`     |
-| **Watcher**  | chokidar · SSE (Server-Sent Events)                                  |
-| **Persistance** | PostgreSQL 16 · Prisma 6                                          |
-| **Auth**     | JWT (`jsonwebtoken`) · `bcryptjs`                                    |
-| **IA**       | `@anthropic-ai/sdk` (analyse contextuelle à la demande)             |
-| **Tests**    | Vitest (18 fichiers de test côté backend)                           |
-| **Infra dev**| Docker Compose (Postgres)                                           |
-
-> Le backend Symfony (PHP) imposé par l'école est prévu comme **second** backend
-> pour démontrer le découplage du moteur — non présent dans ce dépôt à ce stade.
+| Couche | Technologies |
+| ------ | ------------ |
+| **Frontend** | React 18 · Vite · TypeScript · Tailwind · Recharts · lucide-react |
+| **Backend A (origine)** | Node.js 20 · Express 4 · TypeScript (ESM, `tsx`) · Prisma 6 · JWT |
+| **Backend B (soutenance)** | Symfony 7.4 · PHP 8.2 · Doctrine ORM 3 · LexikJWT (RS256) |
+| **Moteur d'analyse** | ESLint 9 (flat config en mémoire) · `@typescript-eslint/parser` |
+| **Persistance** | PostgreSQL 16 (Prisma côté Express, Doctrine côté Symfony) |
+| **IA** | API Anthropic (analyse contextuelle à la demande) |
+| **Tests** | Vitest (moteur + skills) · PHPUnit · PHPStan niveau 5 |
+| **Infra dev** | Docker Compose · GitHub Actions (CI Symfony) |
 
 ## Structure du dépôt
 
 ```
 redline/
-├── redline/                 # Frontend — React + Vite + TypeScript
+├── redline/                 # Frontend - React + Vite + TypeScript (commun aux 2 backends)
 │   └── src/
 │       ├── api/             # client HTTP, auth, gestion du token
 │       ├── app/App.tsx      # coquille : auth → wizard setup ↔ dashboard
 │       ├── domain/          # types, catalogue de skills, stack, config IA
 │       ├── components/
-│       │   ├── ui/          # présentation pure (Toggle, SeverityBadge, FolderTree…)
+│       │   ├── ui/          # présentation pure (Toggle, SeverityBadge, FolderTree...)
 │       │   └── system/      # domaines assemblés (auth, setup/*, dashboard/*)
 │       └── styles/          # Tailwind + thème (terracotta #c0392b, police Outfit)
 │
-├── redline-backend/         # Backend — Express + moteur d'analyse
+├── redline-express/         # Backend A - Node / Express (d'origine) + MOTEUR partagé
 │   ├── src/
-│   │   ├── app.ts / server.ts   # app Express (testable) + démarrage
-│   │   ├── config/          # chargement & validation de l'environnement
-│   │   ├── routes/          # auth, scan, stats, projects, detections
-│   │   ├── controllers/     # logique HTTP par domaine
-│   │   ├── middlewares/     # requireAuth (JWT), errorHandler
-│   │   ├── engine/          # analyzer, watcher, promptBuilder, aiClient, loop
-│   │   ├── skills/          # un dossier par règle (rule.ts + rule.test.ts)
-│   │   ├── db/              # client Prisma + repositories + reconcile
+│   │   ├── server.ts        # backend Express complet (port 3001)
+│   │   ├── engine-server.ts # moteur seul exposé en HTTP pour Symfony (port 4000)
+│   │   ├── routes/ controllers/ middlewares/ auth/ config/ db/   # backend Express
+│   │   ├── engine/          # analyzer (ESLint), watcher, promptBuilder, aiClient, loop
+│   │   ├── skills/          # une règle ESLint par skill (+ index.ts)
 │   │   └── types/report.ts  # contrat JSON moteur ↔ front (source de vérité)
-│   ├── prisma/schema.prisma # User · Project · Detection · DetectionEvent
-│   └── docker-compose.yml   # Postgres local (port hôte 55432)
+│   └── prisma/schema.prisma # User · Project · Detection · DetectionEvent
 │
-└── demo-detection/          # Fichiers d'exemple truffés de problèmes (jeu d'essai)
+├── redline-symfony/         # Backend B - Symfony 7 / PHP 8.2 (version soutenance CDA)
+│   ├── src/
+│   │   ├── Controller/      # Auth, Scan, Skill, Project, Stats, Detection, Analyze
+│   │   ├── Service/         # AnalyzerClient (appelle le moteur), DetectionReconciler...
+│   │   ├── Entity/          # User, Project, Detection, DetectionEvent (Doctrine)
+│   │   └── Enum/            # DetectionStatus, EventType
+│   ├── migrations/          # schéma PostgreSQL (Doctrine Migrations)
+│   └── tests/               # PHPUnit (WebTestCase + KernelTestCase)
+│
+├── demo-detection/          # Fichiers d'exemple truffés de problèmes (jeu d'essai)
+├── soutenance/              # Livrables de soutenance (jalons, mémoire)
+└── docker-compose.yml       # Orchestration version soutenance : database + php + engine
 ```
 
 ## Démarrage rapide
 
-### Prérequis
+Le front est **commun** : il cible le backend indiqué par `VITE_API_URL`. Choisis
+un des deux backends ci-dessous, puis lance le front.
 
-- **Node.js ≥ 20**
-- **Docker Desktop** (pour la base Postgres locale)
-
-### 1. Base de données
+### Option A - Backend d'origine (Node / Express)
 
 ```bash
-cd redline-backend
-docker compose up -d          # démarre Postgres (conteneur redline-postgres, port 55432)
-```
-
-> ⚠️ Le port hôte est **55432** (et non 5432) : les ports 5432/5433 sont réservés
-> à un PostgreSQL 18 natif potentiellement installé sur la machine. Les données
-> persistent dans le volume `redline_pgdata` — un `docker compose down` ne les
-> efface pas.
->
-> Si le conteneur existe déjà mais est arrêté (`Conflict. The container name is
-> already in use`), il suffit de le redémarrer : `docker start redline-postgres`.
-
-### 2. Backend
-
-```bash
-cd redline-backend
+cd redline-express
+docker compose up -d          # Postgres local (port hôte 55432)
 npm install
-cp .env.example .env          # puis ajuste si besoin (JWT_SECRET, DATABASE_URL…)
-npx prisma migrate deploy     # applique le schéma (4 migrations)
+cp .env.example .env          # ajuste si besoin (JWT_SECRET, DATABASE_URL...)
+npx prisma migrate deploy     # applique le schéma
 npm run dev                   # API sur http://localhost:3001
 ```
 
-Vérification : `GET http://localhost:3001/health` → `{ "status": "ok" }`.
+Le front doit alors cibler `http://localhost:3001/api` (voir `redline/.env`).
 
-### 3. Frontend
+### Option B - Backend soutenance (Symfony), via Docker Compose
+
+À la racine du dépôt :
+
+```bash
+docker compose up -d --build
+```
+
+Lance trois conteneurs : `redline-db` (PostgreSQL, port 55433), `redline-php`
+(Symfony, port 8000) et `redline-engine` (le moteur Node, port 4000). Puis :
+
+```bash
+docker compose exec php php bin/console doctrine:migrations:migrate --no-interaction
+docker compose exec php php bin/console doctrine:fixtures:load --no-interaction
+```
+
+Compte de démonstration : **`demo@redline.dev`** / **`demo1234`**. Le front cible
+`http://localhost:8000/api` (valeur par défaut dans `redline/.env`).
+
+### Frontend (commun)
 
 ```bash
 cd redline
@@ -172,95 +195,99 @@ npm install
 npm run dev                   # UI sur http://localhost:5173
 ```
 
-Le front cible `http://localhost:3001/api` par défaut (surchargeable via
-`VITE_API_URL`).
+### Prérequis
+
+- **Node.js ≥ 20**
+- **Docker Desktop** (base de données)
 
 ## Les skills
 
-8 skills implémentés côté backend (règles ESLint réelles, chacune couverte par
+8 skills implémentés dans le moteur (règles ESLint réelles, chacune couverte par
 des tests) :
 
-| Skill                    | Catégorie   | Sévérité   | Détecte                                             |
-| ------------------------ | ----------- | ---------- | --------------------------------------------------- |
-| `sql-injection`          | Sécurité    | critique   | Requêtes SQL construites par concaténation          |
-| `hardcoded-secret`       | Sécurité    | critique   | API keys / tokens / mots de passe en clair          |
-| `xss-risk`               | Sécurité    | warning    | `innerHTML` / `dangerouslySetInnerHTML`             |
-| `cors-wildcard`          | Sécurité    | warning    | `Access-Control-Allow-Origin: *`                    |
-| `missing-error-handling` | Robustesse  | warning    | Appels `async`/`await` sans `try/catch`             |
-| `console-logs`           | Qualité     | warning    | `console.log` de debug oubliés                      |
-| `unused-imports`         | Qualité     | info       | Modules importés jamais utilisés                    |
-| `todo-fixme`             | Qualité     | info       | Commentaires `TODO` / `FIXME` non résolus           |
+| Skill | Catégorie | Sévérité | Détecte |
+| ----- | --------- | -------- | ------- |
+| `sql-injection` | Sécurité | critique | Requêtes SQL construites par concaténation |
+| `hardcoded-secret` | Sécurité | critique | API keys / tokens / mots de passe en clair |
+| `xss-risk` | Sécurité | warning | `innerHTML` / `dangerouslySetInnerHTML` |
+| `cors-wildcard` | Sécurité | warning | `Access-Control-Allow-Origin: *` |
+| `missing-error-handling` | Robustesse | warning | Appels `async`/`await` sans `try/catch` |
+| `console-logs` | Qualité | warning | `console.log` de debug oubliés |
+| `unused-imports` | Qualité | info | Modules importés jamais utilisés |
+| `todo-fixme` | Qualité | info | Commentaires `TODO` / `FIXME` non résolus |
 
-**Ajouter un skill** : créer `src/skills/<mon-skill>/rule.ts` (règle ESLint +
-`meta`) et l'enregistrer dans `src/skills/index.ts`. Aucun autre fichier du
-moteur n'est touché.
+**Ajouter un skill** : créer `redline-express/src/skills/<mon-skill>/rule.ts`
+(règle ESLint + `meta`) et l'enregistrer dans `src/skills/index.ts`. Les deux
+backends en héritent automatiquement.
 
 ## API backend
 
-Base : `http://localhost:3001`. 🔒 = route protégée (Bearer JWT).
+Les deux backends exposent le **même contrat d'API** (préfixe `/api`). 🔒 = route
+protégée (Bearer JWT). Base : `http://localhost:3001` (Express) ou
+`http://localhost:8000` (Symfony).
 
 ### Auth
-| Méthode | Route              | Description                          |
-| ------- | ------------------ | ------------------------------------ |
-| `POST`  | `/api/auth/signup` | Création de compte                   |
-| `POST`  | `/api/auth/login`  | Connexion → renvoie un JWT           |
-| `GET`   | `/api/auth/me` 🔒  | Utilisateur courant (validation jeton)|
+| Méthode | Route | Description |
+| ------- | ----- | ----------- |
+| `POST` | `/api/auth/signup` | Création de compte |
+| `POST` | `/api/auth/login` | Connexion → renvoie un JWT |
+| `GET` | `/api/auth/me` 🔒 | Utilisateur courant (validation du jeton) |
 
-### Analyse & surveillance
-| Méthode | Route                       | Description                                   |
-| ------- | --------------------------- | --------------------------------------------- |
-| `GET`   | `/api/skills`               | Catalogue public des skills                   |
-| `POST`  | `/api/scan` 🔒              | Analyse un fichier → `ScanReport`             |
-| `POST`  | `/api/generate-fix-prompt` 🔒 | Génère le prompt correctif à partir d'un rapport |
-| `POST`  | `/api/tree` 🔒              | Arbre réel des sous-dossiers d'un chemin      |
-| `POST`  | `/api/analyze` 🔒           | Analyse IA à la demande d'un problème          |
-| `POST`  | `/api/watch/sync` 🔒        | Surveille exactement cet ensemble de dossiers |
-| `POST`  | `/api/watch/start` 🔒       | Démarre la surveillance (compat mono-dossier) |
-| `POST`  | `/api/watch/stop` 🔒        | Arrête la surveillance                        |
-| `GET`   | `/api/watch/stream`         | Flux SSE des événements (via `EventSource`)   |
+### Analyse
+| Méthode | Route | Description |
+| ------- | ----- | ----------- |
+| `GET` | `/api/skills` | Catalogue public des skills |
+| `POST` | `/api/scan` 🔒 | Analyse un fichier via le moteur → `ScanReport` |
+| `POST` | `/api/generate-fix-prompt` 🔒 | Génère le prompt correctif à partir d'un rapport |
+| `POST` | `/api/analyze` 🔒 | Analyse IA à la demande d'un problème (API Anthropic) |
 
-### Analytics & données utilisateur
-| Méthode | Route                            | Description                              |
-| ------- | -------------------------------- | ---------------------------------------- |
-| `GET`   | `/api/stats/summary` 🔒          | Synthèse (totaux, sévérité, MTTR…)       |
-| `GET`   | `/api/stats/trends` 🔒           | Tendances horodatées (minute/heure/jour) |
-| `GET`   | `/api/projects` 🔒               | Historique des sessions surveillées      |
-| `GET`   | `/api/detections/ignored` 🔒     | Détections marquées comme faux positifs  |
-| `POST`  | `/api/detections/ignore` 🔒      | Ignorer une détection                    |
-| `POST`  | `/api/detections/restore-all` 🔒 | Restaurer toutes les détections ignorées |
+### Analytics et données utilisateur
+| Méthode | Route | Description |
+| ------- | ----- | ----------- |
+| `GET` | `/api/stats/summary` 🔒 | Synthèse (totaux, sévérité, MTTR...) |
+| `GET` | `/api/stats/trends` 🔒 | Tendances horodatées (minute/heure/jour) |
+| `GET` | `/api/projects` 🔒 | Historique des sessions analysées |
+| `GET` | `/api/detections/ignored` 🔒 | Détections marquées comme faux positifs |
+| `POST` | `/api/detections/ignore` 🔒 | Ignorer une détection |
+| `POST` | `/api/detections/restore-all` 🔒 | Restaurer toutes les détections ignorées |
 
-> Note : `/watch/stream` n'est pas protégé car `EventSource` ne peut pas porter
-> d'en-tête `Authorization` — il ne lit qu'un état en mémoire ; l'isolation par
-> utilisateur se joue à l'écriture en base.
+> Le backend Express propose en plus une **surveillance temps réel** par flux SSE
+> (`/api/watch/*`, `/api/tree`), héritée de sa version d'origine. La version
+> Symfony s'appuie sur une analyse à la demande côté navigateur. Toutes les routes
+> protégées sont scopées par utilisateur (`WHERE user_id = :uid`).
 
 ## Modèle de données
 
-Prisma / PostgreSQL. La base ne stocke que **l'historique** des détections
-(l'analyse elle-même reste *stateless*) :
+Quatre entités, identiques dans les deux backends (Prisma côté Express, Doctrine
+côté Symfony). La base ne stocke que **l'historique** des détections (l'analyse
+elle-même reste *stateless*) :
 
-- **`User`** — compte authentifié, possède ses projets (isolés).
-- **`Project`** — un dossier racine surveillé (unique par utilisateur), mémorise
-  les skills activés et les sous-dossiers exclus pour rejouer la config à la
-  reprise de session.
-- **`Detection`** — l'**identité** d'un problème via une *signature* stable
+- **`User`** - compte authentifié, possède ses projets (isolés).
+- **`Project`** - un dossier analysé, mémorise les skills activés et les
+  sous-dossiers exclus pour rejouer la config à la reprise de session.
+- **`Detection`** - l'**identité** d'un problème via une *signature* stable
   (`fichier::skill::extrait`), avec son cycle de vie (`ACTIVE`/`RESOLVED`,
   `firstSeenAt`/`lastSeenAt`/`resolvedAt`, `reopenCount`, `ignored`). Mise à jour
-  au fil des scans plutôt que recréée.
-- **`DetectionEvent`** — journal horodaté *append-only*
+  au fil des scans plutôt que recréée (réconciliation).
+- **`DetectionEvent`** - journal horodaté *append-only*
   (`APPEARED`/`RESOLVED`/`REOPENED`) alimentant les courbes de tendance et l'audit.
 
 ## Scripts utiles
 
-**Backend** (`redline-backend/`)
+**Backend Express** (`redline-express/`)
 ```bash
-npm run dev          # serveur en watch (tsx)
-npm run build        # compilation TypeScript
-npm test             # Vitest (run unique)
-npm run test:watch   # Vitest en watch
-npm run db:up        # docker compose up -d
-npm run db:down      # docker compose down
+npm run dev          # backend complet en watch (tsx, port 3001)
+npm test             # Vitest (moteur + skills)
 npm run db:migrate   # prisma migrate dev
 npm run db:studio    # Prisma Studio (explorateur de base)
+```
+
+**Backend Symfony** (`redline-symfony/`, via `docker compose exec php ...`)
+```bash
+php bin/console doctrine:migrations:migrate      # applique le schéma
+php bin/console doctrine:fixtures:load           # (re)charge les données de démo
+php bin/phpunit                                  # tests fonctionnels + unitaires
+vendor/bin/phpstan analyse                       # analyse statique (niveau 5)
 ```
 
 **Frontend** (`redline/`)
@@ -270,20 +297,20 @@ npm run typecheck    # tsc --noEmit
 npm run build        # typecheck + build de production
 ```
 
-## État & feuille de route
+## État et feuille de route
 
 **Fait**
+- Backend Express complet (auth JWT, scan, stats, historique, surveillance SSE)
+- Backend Symfony équivalent (version soutenance CDA) branché sur le même moteur
 - Moteur d'analyse ESLint découplé + 8 skills testés
-- Watcher temps réel (chokidar → SSE)
-- Auth JWT, persistance Postgres (historique, tendances, MTTR, faux positifs)
-- Front branché sur le backend réel (wizard + dashboard live)
+- Persistance Postgres (historique, tendances, réconciliation, faux positifs)
+- Front branché sur les backends réels (wizard + dashboard)
+- CI GitHub Actions (PHPStan + PHPUnit), orchestration Docker Compose
 
 **À venir**
-- Second backend **Symfony** (démonstration du découplage du moteur)
-- Réactivation optionnelle de la **boucle de correction automatique**
-  (`engine/loop.ts`) avec garde-fou anti-boucle infinie
 - Enrichissement des skills niveau 3 (React, Express, Symfony)
-- Validation objective des détections contre des outils matures (PHPStan, OWASP…)
+- Réactivation optionnelle de la boucle de correction automatique (`engine/loop.ts`)
+- Déploiement et mise en production
 
 ---
 
