@@ -39,14 +39,15 @@ class AppFixtures extends Fixture
             ->setSkills(['sql-injection', 'hardcoded-secret', 'console-logs', 'todo-fixme']);
         $manager->persist($project);
 
+        // Dernier champ : le problème est-il déjà résolu ?
         $samples = [
-            ['src/db/queries.ts', 'sql-injection', 'security', 'critical', 12, 'const q = "SELECT * FROM users WHERE id = " + id', DetectionStatus::ACTIVE],
-            ['src/config.ts', 'hardcoded-secret', 'security', 'critical', 3, 'const API_KEY = "sk-live-a8f2kJq9mXpL3nR7"', DetectionStatus::ACTIVE],
-            ['src/app.ts', 'console-logs', 'quality', 'warning', 45, 'console.log("debug", user)', DetectionStatus::ACTIVE],
-            ['src/utils.ts', 'todo-fixme', 'quality', 'info', 8, '// TODO: gerer le cas null', DetectionStatus::RESOLVED],
+            ['src/db/queries.ts', 'sql-injection', 'security', 'critical', 12, 'const q = "SELECT * FROM users WHERE id = " + id', false],
+            ['src/config.ts', 'hardcoded-secret', 'security', 'critical', 3, 'const API_KEY = "sk-live-a8f2kJq9mXpL3nR7"', false],
+            ['src/app.ts', 'console-logs', 'quality', 'warning', 45, 'console.log("debug", user)', false],
+            ['src/utils.ts', 'todo-fixme', 'quality', 'info', 8, '// TODO: gerer le cas null', true],
         ];
 
-        foreach ($samples as [$file, $skill, $category, $severity, $line, $snippet, $status]) {
+        foreach ($samples as [$file, $skill, $category, $severity, $line, $snippet, $resolved]) {
             $detection = (new Detection())
                 ->setProject($project)
                 ->setFile($file)
@@ -57,7 +58,7 @@ class AppFixtures extends Fixture
                 ->setSnippet($snippet)
                 ->setSignature("$file::$skill::$snippet");
 
-            if ($status === DetectionStatus::RESOLVED) {
+            if ($resolved) {
                 $detection->setStatus(DetectionStatus::RESOLVED)->setResolvedAt(new \DateTimeImmutable());
             }
             $manager->persist($detection);
@@ -68,7 +69,7 @@ class AppFixtures extends Fixture
                     ->setType(EventType::APPEARED)->setSkillId($skill)->setSeverity($severity)
             );
 
-            if ($status === DetectionStatus::RESOLVED) {
+            if ($resolved) {
                 $manager->persist(
                     (new DetectionEvent())
                         ->setProject($project)->setDetection($detection)
