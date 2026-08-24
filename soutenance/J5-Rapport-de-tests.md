@@ -134,9 +134,9 @@ php bin/phpunit
 Une pipeline **GitHub Actions** (`.github/workflows/ci.yml`) exécute les contrôles
 **à chaque push et pull request**. Elle contient quatre jobs indépendants :
 
-1. frontend : tests Vitest, vérification TypeScript et build Vite ;
-2. moteur Express : génération Prisma, build TypeScript et tests Vitest ;
-3. backend Symfony : PostgreSQL éphémère, PHPStan, migrations et PHPUnit ;
+1. frontend : audit npm, tests Vitest, vérification TypeScript et build Vite ;
+2. moteur Express : audit npm, génération Prisma, build TypeScript et tests Vitest ;
+3. backend Symfony : audit Composer, PostgreSQL éphémère, PHPStan, migrations et PHPUnit ;
 4. Docker Compose : validation de la configuration complète.
 
 Un échec de test fait échouer le build : toute régression est détectée dès le push.

@@ -49,7 +49,7 @@ conducteur de cette analyse.
 | A03 | Injection | Doctrine ORM + DBAL à requêtes paramétrées (aucune concaténation SQL) | ✅ |
 | A04 | Insecure Design | Moteur *stateless*, séparation en couches, garde-fou anti-brute-force | ✅ |
 | A05 | Security Misconfiguration | CORS restreint (Nelmio) + en-têtes de sécurité HTTP | ✅ |
-| A06 | Vulnerable Components | Dépendances verrouillées (lockfiles) ; audit CI à ajouter | 🟡 |
+| A06 | Vulnerable Components | Lockfiles, audits npm et Composer automatisés dans la CI ; aucun avis actif au 24 août 2026 | ✅ |
 | A07 | Identification & Auth Failures | JWT + hachage + **rate limiter anti-brute-force** | ✅ |
 | A08 | Data Integrity Failures | Signature RSA des JWT, dépendances verrouillées | ✅ |
 | A09 | Logging & Monitoring Failures | Journalisation applicative à renforcer | 🟡 |
@@ -233,7 +233,6 @@ configurations `Access-Control-Allow-Origin: *` - que Redline évite chez lui.
 |--------------|----------|
 | Suppression de compte self-service + politique de confidentialité | Moyenne |
 | Passage explicite à Argon2 / coût de hachage supérieur | Moyenne |
-| Audit automatisé des dépendances en CI | Moyenne |
 | Journalisation et surveillance renforcées | Basse |
 
 **Conclusion.** La sécurité est **implémentée et fonctionnelle** sur l'essentiel du
