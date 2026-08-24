@@ -30,6 +30,9 @@ jobs:
       - name: Installer les dependances
         run: npm ci
 
+      - name: Auditer les dependances
+        run: npm audit --audit-level=high
+
       - name: Lancer les tests Vitest
         run: npm test
 
@@ -60,6 +63,9 @@ jobs:
 
       - name: Installer les dependances
         run: npm ci
+
+      - name: Auditer les dependances
+        run: npm audit --audit-level=high
 
       - name: Generer le client Prisma
         run: npx prisma generate
@@ -111,6 +117,9 @@ jobs:
 
       - name: Installer les dependances
         run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Auditer les dependances
+        run: composer audit --locked
 
       - name: Generer la paire de cles JWT
         run: php bin/console lexik:jwt:generate-keypair --overwrite --no-interaction
