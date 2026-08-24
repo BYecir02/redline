@@ -11,11 +11,11 @@ import { StepApiKey } from "./steps/StepApiKey";
 import { StepSkills } from "./steps/StepSkills";
 import type { WatchedFolder, Skill, SetupStep, SubFolder } from "../../../domain/types";
 import { ALL_SKILLS } from "../../../domain/catalog";
-import { STACK_LANGUAGES, STACK_FRAMEWORKS, detectStack, guessProjectType } from "../../../domain/stack";
+import { STACK_LANGUAGES, STACK_FRAMEWORKS, detectStack } from "../../../domain/stack";
 import { DEFAULT_AI_CONFIG, type AIConfig } from "../../../domain/ai";
 import { generateSubFolders, toggleInTree, buildSubFoldersFromTree, applyExcluded } from "../../../domain/folders";
 import { getTree, getProjects, type ProjectSummary } from "../../../api/client";
-import { getDirectoryHandle, registerDirectoryHandle, getTreeFromHandle, pickDirectory, supportsDirectoryPicker, type DirHandle } from "../../../lib/browserWatch";
+import { getDirectoryHandle, registerDirectoryHandle, getTreeFromHandle, inspectStackFromHandle, pickDirectory, supportsDirectoryPicker, type DirHandle } from "../../../lib/browserWatch";
 
 export function SetupScreen({ onLaunch, onViewHistory, userEmail, onLogout }: {
   onLaunch: (folders: WatchedFolder[], skills: Skill[], ai: AIConfig) => void;
@@ -44,10 +44,7 @@ export function SetupScreen({ onLaunch, onViewHistory, userEmail, onLogout }: {
     return () => { alive = false; };
   }, []);
 
-  const stackFor = (p: string): string[] => {
-    const type = guessProjectType(p);
-    return type === "node" ? ["javascript", "typescript"] : type === "python" ? ["python"] : [];
-  };
+  const stackFor = (path: string): string[] => detectStack({ projectPath: path });
 
   // Restaure les toggles de skills sauvegardés pour ce projet ; à défaut (projet
   // antérieur à cette fonctionnalité), on garde la sélection courante.
@@ -84,8 +81,9 @@ export function SetupScreen({ onLaunch, onViewHistory, userEmail, onLogout }: {
       if (!handle) return; // sélection annulée
       const id = `f-${Date.now()}`;
       registerDirectoryHandle(id, handle);
+      const evidence = await inspectStackFromHandle(handle);
       onLaunch(
-        [{ id, path: handle.name, subFolders: await subFoldersFor(handle.name, project.excluded, handle), stack: stackFor(handle.name), isBrowserFolder: true }],
+        [{ id, path: handle.name, subFolders: await subFoldersFor(handle.name, project.excluded, handle), stack: detectStack({ projectPath: handle.name, ...evidence }), isBrowserFolder: true }],
         skillsFor(project.skills),
         ai,
       );
@@ -103,16 +101,28 @@ export function SetupScreen({ onLaunch, onViewHistory, userEmail, onLogout }: {
     setAnalyzing(true);
     setAnalysisLines([]);
 
-    // Map by ID to avoid index drift
+    // Map par ID pour éviter tout décalage si plusieurs dossiers sont analysés.
     const detectedById: Record<string, string[]> = {};
-    folders.forEach(f => { detectedById[f.id] = detectStack([f.path]); });
+    const inspectedFileCountById: Record<string, number> = {};
 
     // Lecture de l'arbre RÉEL du disque (repli : on garde l'arbre template
     // existant si le backend est indisponible ou le chemin invalide).
     const treeById: Record<string, SubFolder[]> = {};
     await Promise.all(folders.map(async (f) => {
+      const handle = getDirectoryHandle(f.id);
+      detectedById[f.id] = stackFor(f.path);
+
+      if (handle) {
+        try {
+          const evidence = await inspectStackFromHandle(handle);
+          detectedById[f.id] = detectStack({ projectPath: f.path, ...evidence });
+          inspectedFileCountById[f.id] = evidence.files.length;
+        } catch {
+          /* lecture des indices impossible : repli sur le nom du dossier */
+        }
+      }
+
       try {
-        const handle = getDirectoryHandle(f.id);
         if (handle) {
           treeById[f.id] = buildSubFoldersFromTree(await getTreeFromHandle(handle));
         } else {
@@ -126,10 +136,16 @@ export function SetupScreen({ onLaunch, onViewHistory, userEmail, onLogout }: {
     const allDetected = [...new Set(Object.values(detectedById).flat())];
     const detectedLangs = allDetected.filter(d => STACK_LANGUAGES.some(l => l.id === d));
     const detectedFws = allDetected.filter(d => STACK_FRAMEWORKS.some(fw => fw.id === d));
+    const inspectedFileCount = Object.values(inspectedFileCountById).reduce((sum, count) => sum + count, 0);
 
     const lines: { text: string; type: "info" | "ok" | "found" }[] = [
       { text: `Analyse de ${folders.length} dossier${folders.length > 1 ? "s" : ""}...`, type: "info" },
-      { text: `Structure lue : ${folders.map(f => f.path.split("/").pop()).join(", ")}`, type: "ok" },
+      {
+        text: inspectedFileCount > 0
+          ? `${inspectedFileCount} fichiers et manifestes inspectés`
+          : "Contenu inaccessible - détection de repli à partir du chemin",
+        type: inspectedFileCount > 0 ? "ok" : "info",
+      },
       {
         text: detectedLangs.length > 0
           ? `Langages detectes : ${detectedLangs.map(id => STACK_LANGUAGES.find(l => l.id === id)?.label ?? id).join(", ")}`
@@ -169,13 +185,11 @@ export function SetupScreen({ onLaunch, onViewHistory, userEmail, onLogout }: {
   const addFolder = () => {
     const trimmed = inputPath.trim();
     if (!trimmed) return;
-    const type = guessProjectType(trimmed);
-    const autoStack: string[] = type === "node" ? ["javascript", "typescript"] : type === "python" ? ["python"] : [];
     const newFolder: WatchedFolder = {
       id: `f-${Date.now()}`,
       path: trimmed,
       subFolders: generateSubFolders(trimmed),
-      stack: autoStack,
+      stack: stackFor(trimmed),
     };
     setFolders((prev) => [...prev, newFolder]);
     setActiveFolderId(newFolder.id);
@@ -185,13 +199,12 @@ export function SetupScreen({ onLaunch, onViewHistory, userEmail, onLogout }: {
   const addFolderFromHandle = async (handle: DirHandle) => {
     const id = `f-${Date.now()}`;
     registerDirectoryHandle(id, handle);
-    const type = guessProjectType(handle.name);
-    const autoStack: string[] = type === "node" ? ["javascript", "typescript"] : type === "python" ? ["python"] : [];
+    const evidence = await inspectStackFromHandle(handle);
     const newFolder: WatchedFolder = {
       id,
       path: handle.name,
       subFolders: generateSubFolders(handle.name),
-      stack: autoStack,
+      stack: detectStack({ projectPath: handle.name, ...evidence }),
       isBrowserFolder: true,
     };
     setFolders((prev) => [...prev, newFolder]);
