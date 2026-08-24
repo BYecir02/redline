@@ -30,6 +30,9 @@ jobs:
       - name: Installer les dependances
         run: npm ci
 
+      - name: Lancer les tests Vitest
+        run: npm test
+
       - name: Verifier les types TypeScript
         run: npm run typecheck
 

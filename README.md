@@ -39,6 +39,12 @@ Le parcours utilisateur se déroule en deux temps :
    sélectionner des alertes pour **générer un prompt de correction** à copier vers
    l'assistant IA.
 
+La stack proposée par le wizard est déduite des extensions, des fichiers de
+configuration et des dépendances déclarées dans les `package.json`. Plusieurs
+manifestes peuvent être inspectés pour couvrir les monorepos. Le nom du dossier
+ne sert que de repli si son contenu est inaccessible, et la sélection reste
+modifiable manuellement avant le lancement.
+
 ## Interface desktop-first
 
 Redline est un outil de développement destiné à être utilisé sur ordinateur, en

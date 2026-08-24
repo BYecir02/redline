@@ -1,11 +1,6 @@
-// Catalogue de skills — périmètre JS/TS uniquement (ce que le moteur ESLint réel
-// sait détecter). Les ids correspondent au registre backend (backend-express).
-// ⚠️ Données de démo (SNIPPETS / AI_ANALYSES) : à remplacer par les vraies
-// détections + l'analyse IA du backend lors du branchement moteur.
-//
-// Statut de branchement :
-//   ✅ déjà implémentés côté backend : sql-injection, hardcoded-secret, missing-error-handling
-//   🕗 faisables en ESLint, à écrire   : console-logs, todo-fixme, xss-risk, cors-wildcard, unused-imports
+// Catalogue UI des huit skills réellement implémentés dans le moteur ESLint.
+// Les snippets servent uniquement d'exemples visuels ; les détections affichées
+// dans le dashboard proviennent toutes du backend.
 import type { Skill } from "./types";
 
 export const ALL_SKILLS: Skill[] = [

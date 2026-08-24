@@ -14,6 +14,11 @@ export type WatchedFileState = {
   report: any; // BackendReport
 };
 
+export type BrowserStackEvidence = {
+  files: string[];
+  packageJsonContents: string[];
+};
+
 const WATCHABLE = /\.(js|jsx|ts|tsx)$/;
 const IGNORED_DIRS = new Set([
   "node_modules", ".git", "dist", "build", "coverage",
@@ -64,6 +69,49 @@ export async function getTreeFromHandle(handle: DirHandle): Promise<TreeNode[]> 
     }
   }
   return list.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Collecte les indices utiles à la détection de stack sans charger tout le code.
+ * Les répertoires techniques sont ignorés et le nombre de fichiers est borné pour
+ * garder le wizard réactif sur les gros dépôts et les monorepos.
+ */
+export async function inspectStackFromHandle(
+  root: DirHandle,
+  maxFiles = 1000,
+  maxManifests = 20,
+): Promise<BrowserStackEvidence> {
+  const files: string[] = [];
+  const packageJsonContents: string[] = [];
+
+  const visit = async (dir: DirHandle, prefix: string, depth: number): Promise<void> => {
+    if (files.length >= maxFiles || depth > 8) return;
+
+    for await (const [name, entry] of (dir as any).entries()) {
+      if (files.length >= maxFiles) break;
+      const relativePath = prefix ? `${prefix}/${name}` : name;
+
+      if (entry.kind === "directory") {
+        if (!IGNORED_DIRS.has(name)) {
+          await visit(entry as DirHandle, relativePath, depth + 1);
+        }
+        continue;
+      }
+
+      files.push(relativePath);
+      if (name.toLowerCase() === "package.json" && packageJsonContents.length < maxManifests) {
+        try {
+          const file = await (entry as FileHandle).getFile();
+          packageJsonContents.push(await file.text());
+        } catch {
+          // Le nom du manifeste reste un indice même si son contenu est illisible.
+        }
+      }
+    }
+  };
+
+  await visit(root, "", 0);
+  return { files, packageJsonContents };
 }
 
 /** Parcourt récursivement le dossier du handle et collecte les fichiers */
