@@ -4,12 +4,74 @@ on:
   push:
   pull_request:
 
-jobs:
-  tests:
-    name: Tests backend (PHPUnit)
-    runs-on: ubuntu-latest
+permissions:
+  contents: read
 
-    # Base PostgreSQL éphémère pour les tests fonctionnels.
+jobs:
+  frontend:
+    name: Frontend - TypeScript et build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: redline
+
+    steps:
+      - name: Recuperer le code
+        uses: actions/checkout@v4
+
+      - name: Configurer Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: redline/package-lock.json
+
+      - name: Installer les dependances
+        run: npm ci
+
+      - name: Verifier les types TypeScript
+        run: npm run typecheck
+
+      - name: Construire le frontend
+        run: npm run build
+
+  engine:
+    name: Moteur Express - build et tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: redline-express
+
+    steps:
+      - name: Recuperer le code
+        uses: actions/checkout@v4
+
+      - name: Configurer Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: redline-express/package-lock.json
+
+      - name: Installer les dependances
+        run: npm ci
+
+      - name: Generer le client Prisma
+        run: npx prisma generate
+
+      - name: Construire le moteur
+        run: npm run build
+
+      - name: Lancer les tests Vitest
+        run: npm test
+
+  backend:
+    name: Backend Symfony - PHPStan et PHPUnit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
     services:
       postgres:
         image: postgres:16-alpine
@@ -31,11 +93,10 @@ jobs:
 
     env:
       DATABASE_URL: "postgresql://redline:redline@127.0.0.1:5432/redline?serverVersion=16&charset=utf8"
-      # Clé JWT sans passphrase (générée à la volée ci-dessous).
       JWT_PASSPHRASE: ""
 
     steps:
-      - name: Récupérer le code
+      - name: Recuperer le code
         uses: actions/checkout@v4
 
       - name: Configurer PHP 8.2
@@ -45,21 +106,33 @@ jobs:
           extensions: pdo_pgsql, intl, zip
           coverage: none
 
-      - name: Installer les dépendances
+      - name: Installer les dependances
         run: composer install --no-interaction --prefer-dist --no-progress
 
-      - name: Générer la paire de clés JWT
+      - name: Generer la paire de cles JWT
         run: php bin/console lexik:jwt:generate-keypair --overwrite --no-interaction
 
-      - name: Analyse statique (PHPStan)
+      - name: Lancer l'analyse statique PHPStan
         run: |
           php bin/console cache:warmup
           vendor/bin/phpstan analyse --no-progress --memory-limit=1G
 
-      - name: Préparer la base de test
+      - name: Preparer la base de test
         run: |
           php bin/console doctrine:database:create --env=test --if-not-exists
           php bin/console doctrine:migrations:migrate --env=test --no-interaction
 
-      - name: Lancer les tests
+      - name: Lancer les tests PHPUnit
         run: php bin/phpunit
+
+  docker-compose:
+    name: Docker Compose - validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Recuperer le code
+        uses: actions/checkout@v4
+
+      - name: Valider la configuration Docker Compose
+        run: docker compose config --quiet
