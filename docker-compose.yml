@@ -1,5 +1,4 @@
-# Orchestration Redline - backend Symfony + base PostgreSQL.
-# Le moteur d'analyse Node sera ajouté plus tard comme service "engine".
+# Orchestration Redline - frontend React, backend Symfony, moteur Node et PostgreSQL.
 #   Lancer :  docker compose up -d --build
 #   Arrêter : docker compose down
 services:
@@ -58,6 +57,21 @@ services:
     restart: unless-stopped
     ports:
       - "4000:4000"
+
+  # Frontend React construit par Vite puis servi par Nginx. Les requêtes /api
+  # sont transmises à Symfony sur le réseau Docker interne.
+  frontend:
+    build:
+      context: ./redline
+      args:
+        VITE_API_URL: /api
+    container_name: redline-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      php:
+        condition: service_started
 
 volumes:
   redline_pgdata:

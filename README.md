@@ -147,7 +147,7 @@ redline/
 │
 ├── demo-detection/          # Fichiers d'exemple truffés de problèmes (jeu d'essai)
 ├── soutenance/              # Livrables de soutenance (jalons, mémoire)
-└── docker-compose.yml       # Orchestration version soutenance : database + php + engine
+└── docker-compose.yml       # Orchestration : frontend + Symfony + moteur + PostgreSQL
 ```
 
 ## Démarrage rapide
@@ -176,18 +176,24 @@ Le front doit alors cibler `http://localhost:3001/api` (voir `redline/.env`).
 docker compose up -d --build
 ```
 
-Lance trois conteneurs : `redline-db` (PostgreSQL, port 55433), `redline-php`
-(Symfony, port 8000) et `redline-engine` (le moteur Node, port 4000). Puis :
+Lance quatre conteneurs : `redline-db` (PostgreSQL, port 55433), `redline-php`
+(Symfony, port 8000), `redline-engine` (le moteur Node, port 4000) et
+`redline-frontend` (React servi par Nginx, port 5173). Puis :
 
 ```bash
 docker compose exec php php bin/console doctrine:migrations:migrate --no-interaction
 docker compose exec php php bin/console doctrine:fixtures:load --no-interaction
 ```
 
-Compte de démonstration : **`demo@redline.dev`** / **`demo1234`**. Le front cible
-`http://localhost:8000/api` (valeur par défaut dans `redline/.env`).
+L'application complète est accessible sur `http://localhost:5173`. Nginx transmet
+les requêtes `/api` au backend Symfony sur le réseau Docker interne.
 
-### Frontend (commun)
+Compte de démonstration : **`demo@redline.dev`** / **`demo1234`**.
+
+### Frontend en développement local
+
+Le lancement séparé reste disponible pour travailler sur l'interface avec le
+rechargement à chaud, ou pour utiliser le backend Express :
 
 ```bash
 cd redline
