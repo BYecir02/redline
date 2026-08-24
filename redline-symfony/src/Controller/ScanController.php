@@ -31,9 +31,13 @@ class ScanController extends AbstractController
         $filename = $data['filename'] ?? null;
         $skills = $data['skills'] ?? [];
         $projectPath = $data['projectPath'] ?? null;
+        $exclude = $data['exclude'] ?? null;
 
-        if (!is_string($code) || !is_string($filename) || !is_array($skills)) {
+        if (!is_string($code) || !is_string($filename) || !$this->isStringList($skills, false)) {
             return $this->json(['error' => 'Champs requis : code (string), filename (string), skills (array).'], 400);
+        }
+        if ($exclude !== null && !$this->isStringList($exclude)) {
+            return $this->json(['error' => 'Le champ exclude doit être un tableau de chaînes.'], 400);
         }
 
         try {
@@ -48,6 +52,10 @@ class ScanController extends AbstractController
         // Persistance de l'historique uniquement si un projet est ciblé.
         if (is_string($projectPath) && $projectPath !== '') {
             $project = $reconciler->getOrCreateProject($user, $projectPath);
+            $project->setSkills(array_values(array_unique($skills)));
+            if (is_array($exclude)) {
+                $project->setExcluded(array_values(array_unique($exclude)));
+            }
             $reconciler->reconcileFileReport($project, $report);
         }
 
@@ -87,6 +95,22 @@ class ScanController extends AbstractController
             : $promptBuilder->buildCorrectionPrompt($report, $code);
 
         return $this->json(['prompt' => $prompt, 'report' => $report]);
+    }
+
+    /** Vérifie qu'une valeur est une liste JSON composée uniquement de chaînes. */
+    private function isStringList(mixed $value, bool $allowEmpty = true): bool
+    {
+        if (!is_array($value) || !array_is_list($value) || (!$allowEmpty && $value === [])) {
+            return false;
+        }
+
+        foreach ($value as $item) {
+            if (!is_string($item)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
 
