@@ -3,13 +3,15 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Dépendances (installées dans le conteneur, pour un environnement Linux cohérent)
+# Dépendances et schéma Prisma, requis avant la génération du client.
 COPY package.json package-lock.json ./
-RUN npm ci
+COPY prisma ./prisma
+RUN npm ci && npx prisma generate
 
-# Code source du moteur
-COPY tsconfig.json ./
+# Configuration, code source et vérification du build TypeScript complet.
+COPY tsconfig.json tsconfig.build.json vitest.config.ts ./
 COPY src ./src
+RUN npm run build
 
 EXPOSE 4000
 
