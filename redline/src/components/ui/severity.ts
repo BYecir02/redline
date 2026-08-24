@@ -1,6 +1,10 @@
-// Maps de présentation par sévérité (couleurs, fonds, pastilles, icônes, libellés).
+// Maps de présentation par sévérité (couleurs, fonds, pastilles, icônes).
+// SEV_LABEL est métier (pas d'UI) : défini dans domain/, ré-exporté ici pour
+// les composants qui l'importaient déjà depuis ce module.
 import { XCircle, AlertTriangle, Info } from "lucide-react";
 import type { Severity } from "../../domain/types";
+
+export { SEV_LABEL } from "../../domain/severity";
 
 export const SEV_COLOR: Record<Severity, string> = {
   critical: "text-[#c0392b]",
@@ -18,8 +22,3 @@ export const SEV_DOT: Record<Severity, string> = {
   info: "bg-[#3a6a8a]",
 };
 export const SEV_ICON = { critical: XCircle, warning: AlertTriangle, info: Info };
-export const SEV_LABEL: Record<Severity, string> = {
-  critical: "Critique",
-  warning: "Attention",
-  info: "Info",
-};

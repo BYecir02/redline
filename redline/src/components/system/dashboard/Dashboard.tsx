@@ -9,9 +9,10 @@ import type { WatchedFolder, Skill, Alert, Severity } from "../../../domain/type
 import type { AIConfig } from "../../../domain/ai";
 import { ALL_SKILLS, AI_ANALYSES } from "../../../domain/catalog";
 import { generateSubFolders, toggleInTree, collectExcluded, buildSubFoldersFromTree, mergeTree } from "../../../domain/folders";
-import { SEV_LABEL } from "../../ui/severity";
-import { analyzeIssue, getTree, getIgnored, ignoreDetection, restoreAllIgnored } from "../../../api/client";
+import { buildFixPrompt } from "../../../domain/prompt";
+import { analyzeIssue, getTree } from "../../../api/client";
 import { useWatchSessions } from "./useWatchSession";
+import { useIgnoredDetections } from "./useIgnoredDetections";
 import { useStats } from "./useStats";
 import { DashboardHeader } from "./DashboardHeader";
 import { FoldersModal } from "./FoldersModal";
@@ -28,30 +29,6 @@ import { PromptPanel } from "./PromptPanel";
  *  Le résolu n'est PLUS ici : il est piloté par la détection (voir useWatchSessions).
  *  Ne reste que l'analyse IA à la demande. */
 type OverlayEntry = { analysis?: string; analyzing?: boolean };
-
-// Alertes « ignorées » (faux positifs assumés) : persistées à part de la session,
-// et distinctes du « résolu ». On les identifie par une SIGNATURE DE CONTENU
-// (dossier + fichier + skill + extrait) et non par l'id à la ligne : ainsi un
-// ignore tient même si le code se décale de quelques lignes.
-const IGNORED_KEY = "redline.ignored";
-
-// Signature côté DB (propre au projet) : `fichier::skill::extrait` — sans le
-// dossier, qui est porté par le projet. Le front la préfixe du dossier pour l'ignore local.
-function dbSigOf(a: Alert): string {
-  return `${a.file}::${a.skillId}::${a.snippet.trim()}`;
-}
-function sigOf(a: Alert): string {
-  return `${a.folderPath}::${dbSigOf(a)}`;
-}
-
-function loadIgnored(): Set<string> {
-  try {
-    const raw = localStorage.getItem(IGNORED_KEY);
-    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
-  } catch {
-    return new Set();
-  }
-}
 
 /** Vrai si la fenêtre est assez large pour la 3ᵉ colonne (sinon repli modal). */
 function useIsWide(minWidth = 1100): boolean {
@@ -81,7 +58,7 @@ export function Dashboard({ folders, initialSkills, ai, onAiChange, onStop, user
 }) {
   const [skills, setSkills] = useState<Skill[]>(initialSkills);
   const [overlay, setOverlay] = useState<Map<string, OverlayEntry>>(new Map());
-  const [ignoredSigs, setIgnoredSigs] = useState<Set<string>>(loadIgnored);
+  const { isIgnored, ignore, clearIgnored } = useIgnoredDetections();
   const [paused, setPaused] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAiSettings, setShowAiSettings] = useState(false);
@@ -109,30 +86,6 @@ export function Dashboard({ folders, initialSkills, ai, onAiChange, onStop, user
     useWatchSessions(watchFolders, enabledSkillIds);
   const hasFolders = watchFolders.some((f) => f.path);
 
-  // Persiste l'ensemble des alertes ignorées (faux positifs) à chaque changement.
-  // Le localStorage sert de cache local ; la source de vérité est la base (chargée
-  // ci-dessous au montage), ce qui permet aux ignores de suivre l'utilisateur.
-  useEffect(() => {
-    try { localStorage.setItem(IGNORED_KEY, JSON.stringify([...ignoredSigs])); } catch { /* stockage indispo */ }
-  }, [ignoredSigs]);
-
-  // Au montage : charge les ignores persistés en base et les fusionne avec le cache
-  // local (union). Ainsi un ignore posé sur un autre poste réapparaît ici.
-  useEffect(() => {
-    let alive = true;
-    getIgnored()
-      .then((entries) => {
-        if (!alive || entries.length === 0) return;
-        setIgnoredSigs((prev) => {
-          const next = new Set(prev);
-          for (const e of entries) next.add(`${e.projectPath}::${e.signature}`);
-          return next;
-        });
-      })
-      .catch(() => { /* backend indispo : on garde le cache local */ });
-    return () => { alive = false; };
-  }, []);
-
   // Pause = gel de l'affichage (actives + résolues) ; on continue de recevoir.
   useEffect(() => {
     if (!paused) setFrozen({ active: liveActive, resolved: liveResolved });
@@ -142,8 +95,8 @@ export function Dashboard({ folders, initialSkills, ai, onAiChange, onStop, user
 
   // On écarte les alertes ignorées AVANT tout : elles disparaissent des compteurs,
   // du graphe, des onglets — plus nulle part, jusqu'à un « réafficher ».
-  const baseActive = useMemo(() => rawActive.filter((a) => !ignoredSigs.has(sigOf(a))), [rawActive, ignoredSigs]);
-  const baseResolved = useMemo(() => rawResolved.filter((a) => !ignoredSigs.has(sigOf(a))), [rawResolved, ignoredSigs]);
+  const baseActive = useMemo(() => rawActive.filter((a) => !isIgnored(a)), [rawActive, isIgnored]);
+  const baseResolved = useMemo(() => rawResolved.filter((a) => !isIgnored(a)), [rawResolved, isIgnored]);
   const ignoredCount = (rawActive.length - baseActive.length) + (rawResolved.length - baseResolved.length);
 
   // Fusion overlay (analyse IA) par id stable, sur les deux listes.
@@ -315,53 +268,18 @@ export function Dashboard({ folders, initialSkills, ai, onAiChange, onStop, user
     }
   };
 
-  // Ignorer = faux positif assumé : on mémorise la signature de contenu et on
-  // nettoie sa sélection/dépliage. Persistant, distinct du « résolu » (auto).
+  // Ignorer = faux positif assumé : on délègue la persistance au hook et on
+  // nettoie la sélection/dépliage de l'alerte concernée.
   const ignoreAlert = (id: string) => {
     const alert = activeAlerts.find((a) => a.id === id);
     if (!alert) return;
-    setIgnoredSigs((prev) => new Set(prev).add(sigOf(alert)));
+    ignore(alert);
     setSelectedAlerts((prev) => { const n = new Set(prev); n.delete(id); return n; });
     setExpandedAlerts((prev) => { const n = new Set(prev); n.delete(id); return n; });
-    // Persistance base (best-effort) : l'ignore local prend le relais si ça échoue.
-    ignoreDetection(alert.folderPath, dbSigOf(alert)).catch(() => {});
   };
 
-  const clearIgnored = () => {
-    setIgnoredSigs(new Set());
-    restoreAllIgnored().catch(() => {});
-  };
-
-  const generatePrompt = () => {
-    const selected = activeAlerts.filter((a) => selectedAlerts.has(a.id));
-    const lines: string[] = [
-      "Tu viens de travailler sur ce projet et Redline a détecté les problèmes suivants dans ton code. Corrige chacun d'eux précisément.",
-      "",
-      `Nombre de problèmes détectés : ${selected.length}`,
-      "",
-      "---",
-      "",
-    ];
-    selected.forEach((alert, i) => {
-      const skill = displaySkills.find((s) => s.id === alert.skillId);
-      if (!skill) return;
-      lines.push(`## Problème ${i + 1} - ${skill.name} (${SEV_LABEL[skill.severity]})`);
-      lines.push(`**Fichier :** \`${alert.folderPath}/${alert.file}\``);
-      lines.push(`**Type :** ${skill.description}`);
-      lines.push(`**Code détecté :**`);
-      lines.push(`\`\`\``);
-      lines.push(alert.snippet);
-      lines.push(`\`\`\``);
-      if (alert.analysis) {
-        lines.push(`**Contexte :** ${alert.analysis.replace(/\*\*/g, "").replace(/`/g, "")}`);
-      }
-      lines.push("");
-    });
-    lines.push("---");
-    lines.push("");
-    lines.push("Pour chaque problème, indique clairement quel fichier tu modifies et montre le code corrigé.");
-    return lines.join("\n");
-  };
+  const generatePrompt = () =>
+    buildFixPrompt(activeAlerts.filter((a) => selectedAlerts.has(a.id)), displaySkills);
 
   const copyPrompt = () => {
     navigator.clipboard.writeText(generatePrompt());
