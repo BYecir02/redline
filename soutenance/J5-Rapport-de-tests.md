@@ -36,8 +36,9 @@ La stratégie de test suit trois niveaux, du plus isolé au plus intégré :
 Priorité assumée : **couvrir en automatique le cœur métier** (authentification,
 cycle de vie des détections, agrégations analytiques) plutôt que de viser un
 pourcentage de couverture élevé mais superficiel. Les fonctionnalités dépendant de
-services externes (moteur Node, API Anthropic) sont vérifiées manuellement (voir
-§5), car les automatiser en CI imposerait des mocks lourds pour un gain limité.
+services externes sont isolées par des doubles de test : le contrat HTTP Anthropic
+est vérifié avec `MockHttpClient` côté Symfony et le SDK est mocké avec Vitest côté
+Express. Aucun secret ni appel réseau payant n'est nécessaire dans la CI.
 
 ---
 
@@ -49,6 +50,11 @@ Ils portent sur des composants purs, exécutés sans base ni réseau.
 produit un texte contenant le fichier, le skill, le message du problème, **et** la
 consigne stricte de sortie (« renvoie UNIQUEMENT le code corrigé »). Un second cas
 vérifie le comportement sur un rapport vide.
+
+**Contrat IA - `AiExplainerTest` et `issueExplainer.test.ts`** : ces tests
+vérifient les en-têtes Anthropic, le corps de la requête, le modèle explicite ou
+par défaut, la concaténation des blocs texte et les cas d'erreur. Ils emploient
+uniquement une fausse clé (`test-key-never-sent`) et interdisent tout appel réseau.
 
 ---
 
@@ -85,26 +91,30 @@ backend (réconciliation par signature et agrégations SQL).
 
 ---
 
-## 5. Vérifications manuelles (périmètre non automatisé)
+## 5. Vérifications manuelles et frontières externes
 
-Par transparence, les endpoints suivants **ne sont pas couverts par des tests
-automatisés** car ils dépendent de services externes :
+La logique métier et les contrats techniques sont automatisés. Les vérifications
+manuelles restantes portent sur l'intégration réelle des services et sur le rendu
+visuel :
 
 | Endpoint | Dépendance | Vérification |
 |----------|------------|--------------|
 | `POST /api/scan` | Moteur Node (ESLint) | Testé manuellement (cURL + démo navigateur) : détections réelles sur des fichiers vulnérables |
-| `POST /api/analyze` | API Anthropic | Testé manuellement : `400` sans clé, `502` avec clé invalide (l'appel atteint bien l'API) |
+| `POST /api/analyze` | API Anthropic | Contrat automatisé avec mocks Symfony et Express : succès, modèle par défaut, clé absente, fournisseur invalide, erreur fournisseur et réponse vide. Un test réel reste facultatif et exige la clé personnelle de l'utilisateur |
 | `POST /api/generate-fix-prompt` | Moteur Node | Testé manuellement : prompt généré si problèmes, `null` sinon |
 | CORS, en-têtes de sécurité, rate-limit | - | Testés manuellement (preflight, `429` après 5 échecs) |
 
-L'automatisation de ces cas (via mocks du moteur et de l'API) est une amélioration
-possible et identifiée.
+Cette séparation permet de tester la robustesse de Redline sans enregistrer de clé
+Anthropic dans le dépôt ou dans GitHub Actions.
 
 ---
 
 ## 6. Outils et exécution
 
 - **PHPUnit** (via `symfony/test-pack`) - framework de test.
+- **Vitest** - tests du moteur Express et contrat mocké du SDK Anthropic.
+- **MockHttpClient** - simulation déterministe des réponses HTTP Anthropic côté
+  Symfony.
 - **`WebTestCase`** (tests fonctionnels) et **`KernelTestCase`** (tests
   d'intégration avec conteneur de services et base réelle).
 - **Base de test dédiée** : environnement `test`, base `redline_test` (suffixe
@@ -121,14 +131,13 @@ php bin/phpunit
 
 ## 7. Intégration continue (CI)
 
-Une pipeline **GitHub Actions** (`.github/workflows/ci.yml`) exécute les tests **à
-chaque push et pull request**. Étapes :
+Une pipeline **GitHub Actions** (`.github/workflows/ci.yml`) exécute les contrôles
+**à chaque push et pull request**. Elle contient quatre jobs indépendants :
 
-1. démarrage d'un service **PostgreSQL** éphémère ;
-2. installation de **PHP 8.2** et des dépendances Composer ;
-3. génération de la paire de clés JWT ;
-4. création et migration de la **base de test** ;
-5. exécution de **PHPUnit**.
+1. frontend : tests Vitest, vérification TypeScript et build Vite ;
+2. moteur Express : génération Prisma, build TypeScript et tests Vitest ;
+3. backend Symfony : PostgreSQL éphémère, PHPStan, migrations et PHPUnit ;
+4. Docker Compose : validation de la configuration complète.
 
 Un échec de test fait échouer le build : toute régression est détectée dès le push.
 
@@ -144,9 +153,9 @@ Un échec de test fait échouer le build : toute régression est détectée dès
 ```
 PHPUnit 11.5.56 by Sebastian Bergmann and contributors.
 
-........                                                            8 / 8 (100%)
+................                                                  16 / 16 (100%)
 
-OK (8 tests, 32 assertions)
+OK (16 tests, 62 assertions)
 ```
 
 | Suite | Type | Tests |
@@ -154,14 +163,16 @@ OK (8 tests, 32 assertions)
 | PromptBuilderTest | Unitaire | 2 |
 | SkillControllerTest | Fonctionnel | 1 |
 | AuthControllerTest | Fonctionnel | 3 |
+| ProjectConfigurationTest | Fonctionnel | 2 |
+| AiExplainerTest | Contrat HTTP mocké | 6 |
 | ReconciliationTest | Intégration | 1 |
 | AnalyticsTest | Intégration | 1 |
-| **Total** | | **8 tests, 32 assertions, 100 % au vert** |
+| **Total Symfony** | | **16 tests, 62 assertions, 100 % au vert** |
+| Moteur Express | Unitaire, contrôleur et contrat SDK mocké | **109 tests dans 19 fichiers, 100 % au vert** |
 
 Le cœur métier (authentification, cycle de vie des détections, analytics) est
-couvert en automatique et vérifié à chaque push par la CI. Les fonctionnalités
-dépendant de services externes sont vérifiées manuellement (§5), avec un plan
-d'automatisation identifié.
+couvert en automatique et vérifié à chaque push par la CI. Le contrat Anthropic
+est lui aussi automatisé, sans clé réelle et sans dépendance au réseau (§5).
 
 ---
 
