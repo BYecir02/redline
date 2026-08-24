@@ -18,13 +18,17 @@ RUN apk add --no-cache \
 # Configuration OPcache. Le serveur `php -S` utilise le SAPI CLI, où OPcache est
 # désactivé par défaut : enable_cli est donc indispensable. Sans ça, PHP re-parse
 # tous les fichiers vendor à chaque requête (très lent sur un montage Windows).
+#
+# validate_timestamps=0 : OPcache ne *stat* plus les fichiers à chaque requête
+# (le montage Windows rend ce stat coûteux). Contrepartie : une modification du
+# code PHP n'est prise en compte qu'après un redémarrage du conteneur
+# (`docker compose restart php`). Compromis assumé pour un dev fluide sous Windows.
 RUN { \
       echo 'opcache.enable=1'; \
       echo 'opcache.enable_cli=1'; \
       echo 'opcache.memory_consumption=256'; \
       echo 'opcache.max_accelerated_files=20000'; \
-      echo 'opcache.validate_timestamps=1'; \
-      echo 'opcache.revalidate_freq=2'; \
+      echo 'opcache.validate_timestamps=0'; \
     } > /usr/local/etc/php/conf.d/zz-opcache.ini
 
 # Composer (récupéré depuis l'image officielle)
