@@ -66,7 +66,12 @@ class AiExplainer
             }
         }
 
-        return trim($text);
+        $text = trim($text);
+        if ($text === '') {
+            throw new \RuntimeException("La réponse de l'API IA ne contient aucun texte.");
+        }
+
+        return $text;
     }
 
     /** @param array{skillName: string, category: string, severity: string, filename: string, line: int, snippet: string} $ctx */

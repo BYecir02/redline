@@ -39,11 +39,17 @@ const anthropicComplete: CompletionFn = async ({ model, apiKey, prompt }) => {
     max_tokens: 1024,
     messages: [{ role: "user", content: prompt }],
   });
-  return message.content
+  const text = message.content
     .filter((block): block is Anthropic.TextBlock => block.type === "text")
     .map((block) => block.text)
     .join("")
     .trim();
+
+  if (!text) {
+    throw new Error("La réponse de l'API IA ne contient aucun texte.");
+  }
+
+  return text;
 };
 
 /** Registre des fournisseurs supportés. Ajouter un fournisseur = une entrée ici. */
