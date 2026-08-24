@@ -4,6 +4,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { SetupScreen } from "../components/system/setup/SetupScreen";
 import { AuthScreen } from "../components/system/auth/AuthScreen";
+import { DesktopViewportGuard } from "../components/system/layout/DesktopViewportGuard";
 import { fetchMe, logout as clearAuth, type AuthUser } from "../api/auth";
 import type { WatchedFolder, Skill } from "../domain/types";
 import { ALL_SKILLS } from "../domain/catalog";
@@ -82,30 +83,34 @@ export default function App() {
   // Connecté + session configurée : dashboard.
   if (config) {
     return (
-      <Suspense fallback={<div className="min-h-screen bg-background" />}>
-        <Dashboard
-          folders={config.folders}
-          initialSkills={config.skills}
-          ai={config.ai}
-          onAiChange={(ai) => setConfig((c) => (c ? { ...c, ai } : c))}
-          onStop={() => setConfig(null)}
-          userEmail={user.email}
-          onLogout={handleLogout}
-          historyProjectPath={config.historyProjectPath}
-        />
-      </Suspense>
+      <DesktopViewportGuard>
+        <Suspense fallback={<div className="min-h-screen bg-background" />}>
+          <Dashboard
+            folders={config.folders}
+            initialSkills={config.skills}
+            ai={config.ai}
+            onAiChange={(ai) => setConfig((c) => (c ? { ...c, ai } : c))}
+            onStop={() => setConfig(null)}
+            userEmail={user.email}
+            onLogout={handleLogout}
+            historyProjectPath={config.historyProjectPath}
+          />
+        </Suspense>
+      </DesktopViewportGuard>
     );
   }
 
   // Connecté sans session : wizard de configuration.
   return (
-    <SetupScreen
-      onLaunch={(folders, skills, ai) => setConfig({ folders, skills, ai })}
-      onViewHistory={(projectPath) =>
-        setConfig({ folders: [], skills: ALL_SKILLS, ai: DEFAULT_AI_CONFIG, historyProjectPath: projectPath })
-      }
-      userEmail={user.email}
-      onLogout={handleLogout}
-    />
+    <DesktopViewportGuard>
+      <SetupScreen
+        onLaunch={(folders, skills, ai) => setConfig({ folders, skills, ai })}
+        onViewHistory={(projectPath) =>
+          setConfig({ folders: [], skills: ALL_SKILLS, ai: DEFAULT_AI_CONFIG, historyProjectPath: projectPath })
+        }
+        userEmail={user.email}
+        onLogout={handleLogout}
+      />
+    </DesktopViewportGuard>
   );
 }

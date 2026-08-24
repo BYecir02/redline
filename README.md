@@ -13,6 +13,7 @@ structuré** à renvoyer à l'IA, jusqu'à ce que le code soit propre.
 ## Sommaire
 
 - [Principe](#principe)
+- [Interface desktop-first](#interface-desktop-first)
 - [Architecture : deux backends, un moteur](#architecture--deux-backends-un-moteur)
 - [Stack technique](#stack-technique)
 - [Structure du dépôt](#structure-du-dépôt)
@@ -37,6 +38,21 @@ Le parcours utilisateur se déroule en deux temps :
    alertes groupées par skill et par sévérité, trace les tendances, et permet de
    sélectionner des alertes pour **générer un prompt de correction** à copier vers
    l'assistant IA.
+
+## Interface desktop-first
+
+Redline est un outil de développement destiné à être utilisé sur ordinateur, en
+parallèle d'un éditeur de code. Le dashboard combine une arborescence de dossiers,
+des indicateurs, une liste d'alertes et un panneau de génération de prompt. Une
+version mobile de ce poste de travail dégraderait donc la lisibilité et la
+manipulation de ces informations.
+
+- La connexion et la création de compte restent utilisables sur une petite largeur.
+- Le wizard et le dashboard demandent une largeur de fenêtre minimale de `1024 px`.
+- Sous ce seuil, Redline affiche un message explicatif au lieu de compresser les panneaux.
+- La résolution de travail recommandée est `1280 × 720` ou supérieure.
+- Entre `1024 px` et `1099 px`, le prompt correctif s'ouvre dans une modale ; à partir
+  de `1100 px`, il peut rester affiché dans une troisième colonne redimensionnable.
 
 ## Architecture : deux backends, un moteur
 
